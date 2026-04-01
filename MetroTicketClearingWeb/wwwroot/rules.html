@@ -1,0 +1,46 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>清分规则配置</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="sidebar">
+        <h2>票务清分系统</h2>
+        <ul>
+            <li><a href="index.html">首页</a></li>
+            <li><a href="data.html">票务数据管理</a></li>
+            <li><a href="rules.html">清分规则配置</a></li>
+            <li><a href="result.html">清分结果展示</a></li>
+        </ul>
+    </div>
+
+    <div class="main">
+        <div class="header">
+            <h1>清分规则配置</h1>
+        </div>
+
+        <div class="panel">
+            <h3>票价规则</h3>
+            <p>0-6公里：2元</p>
+            <p>6-12公里：3元</p>
+            <p>12公里以上：4元</p>
+
+            <h3>清分模式</h3>
+            <select>
+                <option>最短路径清分</option>
+                <option>多路径概率清分</option>
+            </select>
+
+            <h3>换乘贡献系数</h3>
+            <input type="text" value="1.1">
+
+            <br><br>
+            <button onclick="saveRule()">保存规则</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

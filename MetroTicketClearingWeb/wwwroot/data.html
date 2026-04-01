@@ -1,0 +1,66 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>票务数据管理</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="sidebar">
+        <h2>票务清分系统</h2>
+        <ul>
+            <li><a href="index.html">首页</a></li>
+            <li><a href="data.html">票务数据管理</a></li>
+            <li><a href="rules.html">清分规则配置</a></li>
+            <li><a href="result.html">清分结果展示</a></li>
+        </ul>
+    </div>
+
+    <div class="main">
+        <div class="header">
+            <h1>票务数据管理</h1>
+            <button onclick="importData()">导入交易数据</button>
+        </div>
+
+        <div class="panel">
+            <h3>交易数据列表</h3>
+            <table>
+                <tr>
+                    <th>交易ID</th>
+                    <th>卡号</th>
+                    <th>进站站点</th>
+                    <th>出站站点</th>
+                    <th>支付金额</th>
+                    <th>状态</th>
+                </tr>
+                <tr>
+                    <td>T001</td>
+                    <td>888001</td>
+                    <td>火车站</td>
+                    <td>东广场</td>
+                    <td>4.00</td>
+                    <td>正常</td>
+                </tr>
+                <tr>
+                    <td>T002</td>
+                    <td>888002</td>
+                    <td>市政府</td>
+                    <td>大学城</td>
+                    <td>5.00</td>
+                    <td>正常</td>
+                </tr>
+                <tr>
+                    <td>T003</td>
+                    <td>888003</td>
+                    <td>人民路</td>
+                    <td>无出站记录</td>
+                    <td>0.00</td>
+                    <td>异常</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

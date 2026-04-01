@@ -1,0 +1,58 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>清分结果展示</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="sidebar">
+        <h2>票务清分系统</h2>
+        <ul>
+            <li><a href="index.html">首页</a></li>
+            <li><a href="data.html">票务数据管理</a></li>
+            <li><a href="rules.html">清分规则配置</a></li>
+            <li><a href="result.html">清分结果展示</a></li>
+        </ul>
+    </div>
+
+    <div class="main">
+        <div class="header">
+            <h1>清分结果展示</h1>
+            <button onclick="runClearing()">执行清分</button>
+        </div>
+
+        <div class="panel">
+            <h3>清分结果明细</h3>
+            <table>
+                <tr>
+                    <th>交易ID</th>
+                    <th>线路</th>
+                    <th>运营商</th>
+                    <th>清分金额</th>
+                </tr>
+                <tr>
+                    <td>T001</td>
+                    <td>1号线</td>
+                    <td>A运营公司</td>
+                    <td>2.50</td>
+                </tr>
+                <tr>
+                    <td>T001</td>
+                    <td>2号线</td>
+                    <td>B运营公司</td>
+                    <td>1.50</td>
+                </tr>
+                <tr>
+                    <td>T002</td>
+                    <td>3号线</td>
+                    <td>C运营公司</td>
+                    <td>5.00</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
