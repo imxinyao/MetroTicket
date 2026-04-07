@@ -1,0 +1,62 @@
+﻿@page
+@model MetroTicketClearingWeb.Pages.DataImportModel
+@{
+    ViewData["Title"] = "测试数据导入";
+}
+
+<div class="container mt-4">
+    <h1 class="mb-4">地铁票务清分系统 - 测试数据导入</h1>
+
+    <div class="card">
+        <div class="card-body">
+            <p>点击下面按钮，将向数据库导入一批演示数据：</p>
+            <ul>
+                <li>运营主体</li>
+                <li>线路</li>
+                <li>车站</li>
+                <li>区间</li>
+                <li>票务交易</li>
+            </ul>
+
+            <form method="post">
+                <button type="submit" asp-page-handler="Import" class="btn btn-primary">
+                    一键导入测试数据
+                </button>
+                <a href="/DbCheck" class="btn btn-secondary ms-2">查看数据库检查页</a>
+            </form>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.Result.Message))
+    {
+        <div class="alert @(Model.Result.Success ? "alert-success" : "alert-danger") mt-4">
+            <strong>@Model.Result.Message</strong>
+        </div>
+
+        @if (Model.Result.Success)
+        {
+            <div class="card mt-3">
+                <div class="card-header">
+                    <strong>导入结果</strong>
+                </div>
+                <div class="card-body">
+                    <table class="table table-bordered">
+                        <thead>
+                            <tr>
+                                <th>表名</th>
+                                <th>记录数</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>operator_info</td><td>@Model.Result.OperatorCount</td></tr>
+                            <tr><td>line_info</td><td>@Model.Result.LineCount</td></tr>
+                            <tr><td>station_info</td><td>@Model.Result.StationCount</td></tr>
+                            <tr><td>section_info</td><td>@Model.Result.SectionCount</td></tr>
+                            <tr><td>ticket_transaction</td><td>@Model.Result.TransactionCount</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+</div>

@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace MetroTicketClearingWeb.Pages
@@ -7,7 +6,6 @@ namespace MetroTicketClearingWeb.Pages
     {
         public void OnGet()
         {
-
         }
     }
 }

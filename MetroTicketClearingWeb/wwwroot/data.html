@@ -24,43 +24,108 @@
 
         <div class="panel">
             <h3>交易数据列表</h3>
+
+            <div id="message" style="margin-bottom: 12px; color: #666;"></div>
+
             <table>
-                <tr>
-                    <th>交易ID</th>
-                    <th>卡号</th>
-                    <th>进站站点</th>
-                    <th>出站站点</th>
-                    <th>支付金额</th>
-                    <th>状态</th>
-                </tr>
-                <tr>
-                    <td>T001</td>
-                    <td>888001</td>
-                    <td>火车站</td>
-                    <td>东广场</td>
-                    <td>4.00</td>
-                    <td>正常</td>
-                </tr>
-                <tr>
-                    <td>T002</td>
-                    <td>888002</td>
-                    <td>市政府</td>
-                    <td>大学城</td>
-                    <td>5.00</td>
-                    <td>正常</td>
-                </tr>
-                <tr>
-                    <td>T003</td>
-                    <td>888003</td>
-                    <td>人民路</td>
-                    <td>无出站记录</td>
-                    <td>0.00</td>
-                    <td>异常</td>
-                </tr>
+                <thead>
+                    <tr>
+                        <th>交易ID</th>
+                        <th>卡号</th>
+                        <th>进站站点</th>
+                        <th>出站站点</th>
+                        <th>支付金额</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody id="transactionTableBody">
+                    <tr>
+                        <td colspan="6">正在加载数据...</td>
+                    </tr>
+                </tbody>
             </table>
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script>
+        const apiBaseUrl = "https://localhost:7179/api";
+
+        async function loadTransactions() {
+            const tbody = document.getElementById("transactionTableBody");
+            const message = document.getElementById("message");
+
+            tbody.innerHTML = `<tr><td colspan="6">正在加载数据...</td></tr>`;
+            message.textContent = "";
+
+            try {
+                const response = await fetch(`${apiBaseUrl}/transactions`);
+
+                if (!response.ok) {
+                    throw new Error(`接口请求失败：${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="6">暂无交易数据</td></tr>`;
+                    message.textContent = "当前数据库中没有交易数据，可点击“导入交易数据”生成测试数据。";
+                    return;
+                }
+
+                tbody.innerHTML = data.map(item => `
+                    <tr>
+                        <td>${item.transactionId}</td>
+                        <td>${item.cardNo}</td>
+                        <td>${item.entryStationName ?? "无进站记录"}</td>
+                        <td>${item.exitStationName ?? "无出站记录"}</td>
+                        <td>${Number(item.payAmount).toFixed(2)}</td>
+                        <td>${item.transactionStatus}</td>
+                    </tr>
+                `).join("");
+
+                message.textContent = `共加载 ${data.length} 条交易记录`;
+            } catch (error) {
+                console.error(error);
+                tbody.innerHTML = `<tr><td colspan="6">数据加载失败</td></tr>`;
+                message.textContent = "无法连接后端接口，请检查后端服务是否启动。";
+            }
+        }
+
+        async function importData() {
+            const message = document.getElementById("message");
+            const importButton = document.querySelector("button[onclick='importData()']");
+
+            try {
+                importButton.disabled = true;
+                importButton.textContent = "正在导入...";
+                message.textContent = "正在导入测试数据，请稍候...";
+
+                const response = await fetch(`${apiBaseUrl}/transactions/import-demo`, {
+                    method: "POST"
+                });
+
+                const result = await response.json();
+
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || "导入失败");
+                }
+
+                message.textContent =
+                    `${result.message} 当前共有 ${result.transactionCount} 条交易记录。`;
+
+                await loadTransactions();
+                alert("测试数据导入成功！");
+            } catch (error) {
+                console.error(error);
+                message.textContent = `导入失败：${error.message}`;
+                alert(`导入失败：${error.message}`);
+            } finally {
+                importButton.disabled = false;
+                importButton.textContent = "导入交易数据";
+            }
+        }
+
+        window.onload = loadTransactions;
+    </script>
 </body>
 </html>
