@@ -28,26 +28,63 @@
             <p>6 - 10 公里：4 元</p>
             <p>10 公里以上：5 元</p>
 
-            <h3>清分模式</h3>
-            <select>
-                <option>最短路径清分</option>
-                <option>多路径概率清分</option>
+            <h3 style="margin-top: 20px;">清分模式</h3>
+            <select id="clearingMode">
+                <option value="shortest">最短路径清分</option>
+                <option value="multi">多路径概率清分</option>
             </select>
 
-            <h3>换乘贡献系数</h3>
-            <input type="text" value="1.1">
+            <h3 style="margin-top: 20px;">换乘贡献系数</h3>
+            <input type="text" id="transferFactorInput" value="1.1">
 
             <h3 style="margin-top: 20px;">规则说明</h3>
-            <p>1. 单次交易票价根据乘客实际最短路径总里程分段计价。</p>
-            <p>2. 涉及换乘的交易，按各线路承担的里程比例进行清分。</p>
-            <p>3. 换乘站可按换乘贡献系数进行适当加权。</p>
-            <p>4. 异常交易（如无出站、超时）可按异常规则单独处理。</p>
+            <p>1. 单次交易票价按照乘客实际最短路径总里程进行分段计价。</p>
+            <p>2. 0 - 3 公里按 2 元计费，3 - 6 公里按 3 元计费，6 - 10 公里按 4 元计费，10 公里以上按 5 元计费。</p>
+            <p>3. 涉及换乘的交易，按各线路承担的里程比例进行清分。</p>
+            <p>4. 换乘站可结合换乘贡献系数进行加权分摊。</p>
+            <p>5. 异常交易（如无出站、超时）按异常规则单独处理，不参与正常路径清分。</p>
+
+            <div id="saveMessage" class="message-text" style="margin-top: 16px;"></div>
 
             <br>
             <button onclick="saveRule()">保存规则</button>
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script>
+        function saveRule() {
+            const factorInput = document.getElementById("transferFactorInput");
+            const clearingMode = document.getElementById("clearingMode").value;
+            const saveMessage = document.getElementById("saveMessage");
+
+            const transferFactor = parseFloat(factorInput.value);
+
+            if (isNaN(transferFactor) || transferFactor <= 0) {
+                saveMessage.textContent = "保存失败：请输入大于 0 的有效换乘贡献系数。";
+                saveMessage.className = "message-text danger-text";
+                return;
+            }
+
+            localStorage.setItem("transferFactor", transferFactor.toString());
+            localStorage.setItem("clearingMode", clearingMode);
+
+            saveMessage.textContent = `规则已保存：换乘贡献系数 = ${transferFactor}，清分模式 = ${clearingMode === "shortest" ? "最短路径清分" : "多路径概率清分"}`;
+            saveMessage.className = "message-text success-text";
+            alert("规则保存成功！");
+        }
+
+        window.onload = function () {
+            const savedFactor = localStorage.getItem("transferFactor");
+            const savedMode = localStorage.getItem("clearingMode");
+
+            if (savedFactor) {
+                document.getElementById("transferFactorInput").value = savedFactor;
+            }
+
+            if (savedMode) {
+                document.getElementById("clearingMode").value = savedMode;
+            }
+        };
+    </script>
 </body>
 </html>
