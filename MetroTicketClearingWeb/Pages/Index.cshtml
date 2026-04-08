@@ -1,9 +1,145 @@
 ﻿@page
 @model IndexModel
 @{
-    ViewData["Title"] = "Home page";
+    Layout = null;
+    ViewData["Title"] = "首页";
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-</div>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>首页 - 票务清分系统</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="sidebar">
+        <h2>票务清分系统</h2>
+        <ul>
+            <li><a href="/" class="active">首页</a></li>
+            <li><a href="/data.html">票务数据管理</a></li>
+            <li><a href="/rules.html">清分规则配置</a></li>
+            <li><a href="/result.html">清分结果展示</a></li>
+        </ul>
+    </div>
+
+    <div class="main">
+        <div class="header page-header">
+            <div>
+                <h1>系统首页</h1>
+                <p class="sub-text">展示当前票务交易概况与最近交易记录</p>
+            </div>
+            <button onclick="loadDashboard()">刷新统计</button>
+        </div>
+
+        <div class="cards dashboard-cards">
+            <div class="card">
+                <h3>当前交易总数</h3>
+                <p id="totalCount">0</p>
+            </div>
+            <div class="card">
+                <h3>正常交易数</h3>
+                <p id="normalCount" class="success-text">0</p>
+            </div>
+            <div class="card">
+                <h3>异常交易数</h3>
+                <p id="exceptionCount" class="danger-text">0</p>
+            </div>
+            <div class="card">
+                <h3>交易总金额</h3>
+                <p id="totalAmount">0.00</p>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>运行状态</h3>
+            <div id="message" class="message-text">正在加载首页数据...</div>
+        </div>
+
+        <div class="panel">
+            <h3>最近交易记录</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>交易ID</th>
+                        <th>卡号</th>
+                        <th>进站站点</th>
+                        <th>出站站点</th>
+                        <th>支付金额</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody id="recentTransactionTableBody">
+                    <tr>
+                        <td colspan="6">正在加载数据...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+            const apiBaseUrl = "https://localhost:7179/api";
+
+            async function loadDashboard() {
+                const message = document.getElementById("message");
+                const recentTableBody = document.getElementById("recentTransactionTableBody");
+
+                try {
+                    message.textContent = "正在加载首页统计数据...";
+                    recentTableBody.innerHTML = `<tr><td colspan="6">正在加载数据...</td></tr>`;
+
+                    const response = await fetch(`${apiBaseUrl}/transactions`);
+                    if (!response.ok) {
+                        throw new Error(`接口请求失败：${response.status}`);
+                    }
+
+                    const data = await response.json();
+
+                    if (!data || data.length === 0) {
+                        document.getElementById("totalCount").textContent = "0";
+                        document.getElementById("normalCount").textContent = "0";
+                        document.getElementById("exceptionCount").textContent = "0";
+                        document.getElementById("totalAmount").textContent = "0.00";
+
+                        recentTableBody.innerHTML = `<tr><td colspan="6">暂无交易数据</td></tr>`;
+                        message.textContent = "当前数据库中没有交易数据。";
+                        return;
+                    }
+
+                    const totalCount = data.length;
+                    const normalCount = data.filter(x => x.transactionStatus === "NORMAL").length;
+                    const exceptionCount = data.filter(x => x.transactionStatus === "EXCEPTION").length;
+                    const totalAmount = data.reduce((sum, x) => sum + Number(x.payAmount || 0), 0);
+
+                    document.getElementById("totalCount").textContent = totalCount;
+                    document.getElementById("normalCount").textContent = normalCount;
+                    document.getElementById("exceptionCount").textContent = exceptionCount;
+                    document.getElementById("totalAmount").textContent = totalAmount.toFixed(2);
+
+                    const recentData = data.slice(0, 8);
+                    recentTableBody.innerHTML = recentData.map(item => `
+                        <tr>
+                            <td>${item.transactionId}</td>
+                            <td>${item.cardNo}</td>
+                            <td>${item.entryStationName ?? "无进站记录"}</td>
+                            <td>${item.exitStationName ?? "无出站记录"}</td>
+                            <td>${Number(item.payAmount).toFixed(2)}</td>
+                            <td class="${item.transactionStatus === 'EXCEPTION' ? 'danger-text' : 'success-text'}">
+                                ${item.transactionStatus}
+                            </td>
+                        </tr>
+                    `).join("");
+
+                    message.textContent = `首页统计加载成功，共读取 ${totalCount} 条交易记录。`;
+                } catch (error) {
+                    console.error(error);
+                    message.textContent = "首页数据加载失败，请检查后端服务是否启动。";
+                    recentTableBody.innerHTML = `<tr><td colspan="6">加载失败</td></tr>`;
+                }
+            }
+
+            window.onload = loadDashboard;
+    </script>
+</body>
+</html>
