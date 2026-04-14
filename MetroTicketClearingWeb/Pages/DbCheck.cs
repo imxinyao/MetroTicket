@@ -42,7 +42,9 @@ namespace MetroTicketClearingWeb.Pages
                     "line_info",
                     "station_info",
                     "section_info",
-                    "ticket_transaction"
+                    "ticket_transaction",
+                    "train_timetable",
+                    "train_timetable_detail"
                 };
 
                 foreach (var tableName in tableNames)

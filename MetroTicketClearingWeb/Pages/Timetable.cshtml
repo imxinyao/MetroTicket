@@ -1,0 +1,121 @@
+﻿@page
+@model MetroTicketClearingWeb.Pages.TimetableModel
+@{
+    ViewData["Title"] = "时刻表与清分准备";
+}
+
+<div class="header page-header">
+    <div>
+        <h1>时刻表与清分准备</h1>
+        <p class="sub-text">用于查看时刻表主数据，并为后续刷卡匹配与清分提供基础。</p>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="panel">
+        <div class="message-text danger-text">@Model.ErrorMessage</div>
+    </div>
+}
+
+<div class="panel">
+    <h3>时刻表列表</h3>
+
+    @if (Model.Timetables.Count == 0)
+    {
+        <div class="message-text">当前没有时刻表数据。</div>
+    }
+    else
+    {
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>编号</th>
+                    <th>名称</th>
+                    <th>线路</th>
+                    <th>方向</th>
+                    <th>版本</th>
+                    <th>生效开始</th>
+                    <th>生效结束</th>
+                    <th>状态</th>
+                    <th>激活状态</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in Model.Timetables)
+                {
+                    <tr style="@(Model.TimetableId == item.TimetableId ? "background-color:#eef5ff;" : "")">
+                        <td>@item.TimetableId</td>
+                        <td>@item.TimetableCode</td>
+                        <td>@item.TimetableName</td>
+                        <td>@item.LineId</td>
+                        <td>@(!string.IsNullOrWhiteSpace(item.DirectionText) ? item.DirectionText : Model.GetDirectionText(item.Direction))</td>
+                        <td>@item.VersionNo</td>
+                        <td>@item.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
+                        <td>@item.EffectiveEndDate.ToString("yyyy-MM-dd")</td>
+                        <td>@(!string.IsNullOrWhiteSpace(item.StatusText) ? item.StatusText : Model.GetStatusText(item.Status))</td>
+                        <td>@(!string.IsNullOrWhiteSpace(item.ActiveText) ? item.ActiveText : Model.GetActiveText(item.IsActive))</td>
+                        <td>
+                            <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+                                <a href="/Timetable?TimetableId=@item.TimetableId" class="action-link-btn">查看详情</a>
+
+                                <form method="post" asp-page-handler="Publish" style="display:inline;">
+                                    <input type="hidden" name="timetableId" value="@item.TimetableId" />
+                                    <button type="submit">发布</button>
+                                </form>
+
+                                <form method="post" asp-page-handler="Disable" style="display:inline;">
+                                    <input type="hidden" name="timetableId" value="@item.TimetableId" />
+                                    <button type="submit">停用</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+<div class="panel">
+    <h3>时刻表明细</h3>
+
+    @if (Model.Details.Count == 0)
+    {
+        <div class="message-text">暂无明细数据。</div>
+    }
+    else
+    {
+        <table>
+            <thead>
+                <tr>
+                    <th>车次号</th>
+                    <th>站序</th>
+                    <th>站点编码</th>
+                    <th>站点名称</th>
+                    <th>到站时间</th>
+                    <th>发车时间</th>
+                    <th>始发站</th>
+                    <th>终点站</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in Model.Details)
+                {
+                    <tr>
+                        <td>@item.TrainNo</td>
+                        <td>@item.StationSeq</td>
+                        <td>@item.StationCode</td>
+                        <td>@item.StationName</td>
+                        <td>@(string.IsNullOrEmpty(item.ArrivalTime) ? "-" : item.ArrivalTime)</td>
+                        <td>@(string.IsNullOrEmpty(item.DepartureTime) ? "-" : item.DepartureTime)</td>
+                        <td>@(!string.IsNullOrWhiteSpace(item.OriginText) ? item.OriginText : (item.IsOriginStation == 1 ? "是" : "否"))</td>
+                        <td>@(!string.IsNullOrWhiteSpace(item.TerminalText) ? item.TerminalText : (item.IsTerminalStation == 1 ? "是" : "否"))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>

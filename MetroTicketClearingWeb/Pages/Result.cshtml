@@ -1,0 +1,298 @@
+﻿@page
+@model MetroTicketClearingWeb.Pages.ResultModel
+@{
+    ViewData["Title"] = "清分结果展示";
+}
+
+<div class="header page-header">
+    <div>
+        <h1>清分结果展示</h1>
+        <p class="sub-text">根据交易数据和规则参数进行模拟清分</p>
+    </div>
+    <button onclick="runClearing()">执行清分</button>
+</div>
+
+<div class="panel">
+    <h3>当前清分参数</h3>
+    <div id="ruleInfo" class="message-text">正在读取规则参数...</div>
+</div>
+
+<div class="cards dashboard-cards">
+    <div class="card">
+        <h3>参与清分交易数</h3>
+        <p id="normalTradeCount">0</p>
+    </div>
+    <div class="card">
+        <h3>异常交易数</h3>
+        <p id="exceptionTradeCount" class="danger-text">0</p>
+    </div>
+    <div class="card">
+        <h3>清分总金额</h3>
+        <p id="totalClearingAmount">0.00</p>
+    </div>
+</div>
+
+<div class="panel">
+    <h3>线路清分汇总</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>线路</th>
+                <th>清分金额</th>
+            </tr>
+        </thead>
+        <tbody id="summaryTableBody">
+            <tr>
+                <td colspan="2">点击“执行清分”后显示结果</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="panel">
+    <h3>清分结果明细</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>交易ID</th>
+                <th>卡号</th>
+                <th>进站站点</th>
+                <th>出站站点</th>
+                <th>支付金额</th>
+                <th>清分线路</th>
+                <th>清分金额</th>
+            </tr>
+        </thead>
+        <tbody id="detailTableBody">
+            <tr>
+                <td colspan="7">点击“执行清分”后显示结果</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+@section Scripts {
+    <script>
+        const apiBaseUrl = "https://localhost:7179/api";
+
+        const line1Stations = ["A站", "B站", "C站", "D站", "E站"];
+        const line2Stations = ["F站", "G站", "D站", "H站", "I站"];
+        const line3Stations = ["J站", "K站", "I站", "E站", "L站"];
+
+        const transferStationLines = {
+            "D站": ["1号线", "2号线"],
+            "E站": ["1号线", "3号线"],
+            "I站": ["2号线", "3号线"]
+        };
+
+        function getBelongLines(stationName) {
+            const lines = [];
+            if (line1Stations.includes(stationName)) lines.push("1号线");
+            if (line2Stations.includes(stationName)) lines.push("2号线");
+            if (line3Stations.includes(stationName)) lines.push("3号线");
+            return lines;
+        }
+
+        function normalizeAllocations(weights, amount) {
+            const totalWeight = Object.values(weights).reduce((sum, v) => sum + v, 0);
+            const result = {};
+            let allocated = 0;
+            const keys = Object.keys(weights);
+
+            keys.forEach((key, index) => {
+                let value;
+                if (index === keys.length - 1) {
+                    value = +(amount - allocated).toFixed(2);
+                } else {
+                    value = +((amount * weights[key]) / totalWeight).toFixed(2);
+                    allocated += value;
+                }
+                result[key] = value;
+            });
+
+            return result;
+        }
+
+        function calculateClearing(entryStation, exitStation, amount, transferFactor, clearingMode) {
+            const entryLines = getBelongLines(entryStation);
+            const exitLines = getBelongLines(exitStation);
+            const allLines = Array.from(new Set([...entryLines, ...exitLines]));
+
+            const entryIsTransfer = transferStationLines[entryStation];
+            const exitIsTransfer = transferStationLines[exitStation];
+
+            if (allLines.length === 1) {
+                return [{ line: allLines[0], amount: amount }];
+            }
+
+            let weights = {};
+
+            if (allLines.length === 2) {
+                allLines.forEach(line => {
+                    weights[line] = 1;
+                });
+
+                if (entryIsTransfer) {
+                    entryIsTransfer.forEach(line => {
+                        if (weights[line] !== undefined) {
+                            weights[line] *= transferFactor;
+                        }
+                    });
+                }
+
+                if (exitIsTransfer) {
+                    exitIsTransfer.forEach(line => {
+                        if (weights[line] !== undefined) {
+                            weights[line] *= transferFactor;
+                        }
+                    });
+                }
+
+                if (clearingMode === "multi") {
+                    allLines.forEach(line => {
+                        weights[line] *= 1.05;
+                    });
+                }
+
+                const normalized = normalizeAllocations(weights, amount);
+
+                return allLines.map(line => ({
+                    line,
+                    amount: normalized[line]
+                }));
+            }
+
+            if (allLines.length === 3) {
+                weights = {
+                    "1号线": 0.4,
+                    "2号线": 0.3,
+                    "3号线": 0.3
+                };
+
+                if (entryIsTransfer) {
+                    entryIsTransfer.forEach(line => {
+                        if (weights[line] !== undefined) {
+                            weights[line] *= transferFactor;
+                        }
+                    });
+                }
+
+                if (exitIsTransfer) {
+                    exitIsTransfer.forEach(line => {
+                        if (weights[line] !== undefined) {
+                            weights[line] *= transferFactor;
+                        }
+                    });
+                }
+
+                if (clearingMode === "multi") {
+                    weights["2号线"] *= 1.05;
+                    weights["3号线"] *= 1.05;
+                }
+
+                const normalized = normalizeAllocations(weights, amount);
+
+                return Object.keys(normalized).map(line => ({
+                    line,
+                    amount: normalized[line]
+                }));
+            }
+
+            return [];
+        }
+
+        async function runClearing() {
+            const summaryTableBody = document.getElementById("summaryTableBody");
+            const detailTableBody = document.getElementById("detailTableBody");
+            const ruleInfo = document.getElementById("ruleInfo");
+
+            const transferFactor = parseFloat(localStorage.getItem("transferFactor")) || 1.1;
+            const clearingMode = localStorage.getItem("clearingMode") || "shortest";
+
+            ruleInfo.textContent = `当前换乘贡献系数：${transferFactor}；当前清分模式：${clearingMode === "shortest" ? "最短路径清分" : "多路径概率清分"}`;
+
+            try {
+                summaryTableBody.innerHTML = `<tr><td colspan="2">正在计算...</td></tr>`;
+                detailTableBody.innerHTML = `<tr><td colspan="7">正在计算...</td></tr>`;
+
+                const response = await fetch(`${apiBaseUrl}/transactions`);
+                if (!response.ok) {
+                    throw new Error(`接口请求失败：${response.status}`);
+                }
+
+                const data = await response.json();
+
+                const normalTrades = data.filter(x => x.transactionStatus === "NORMAL");
+                const exceptionTrades = data.filter(x => x.transactionStatus === "EXCEPTION");
+
+                document.getElementById("normalTradeCount").textContent = normalTrades.length;
+                document.getElementById("exceptionTradeCount").textContent = exceptionTrades.length;
+
+                let totalClearingAmount = 0;
+                let lineSummary = {
+                    "1号线": 0,
+                    "2号线": 0,
+                    "3号线": 0
+                };
+
+                let detailRows = [];
+
+                normalTrades.forEach(item => {
+                    const amount = Number(item.payAmount || 0);
+                    totalClearingAmount += amount;
+
+                    const clearingResults = calculateClearing(
+                        item.entryStationName ?? "",
+                        item.exitStationName ?? "",
+                        amount,
+                        transferFactor,
+                        clearingMode
+                    );
+
+                    clearingResults.forEach(result => {
+                        lineSummary[result.line] += result.amount;
+
+                        detailRows.push(`
+                            <tr>
+                                <td>${item.transactionId}</td>
+                                <td>${item.cardNo}</td>
+                                <td>${item.entryStationName ?? "无进站记录"}</td>
+                                <td>${item.exitStationName ?? "无出站记录"}</td>
+                                <td>${amount.toFixed(2)}</td>
+                                <td>${result.line}</td>
+                                <td>${result.amount.toFixed(2)}</td>
+                            </tr>
+                        `);
+                    });
+                });
+
+                document.getElementById("totalClearingAmount").textContent = totalClearingAmount.toFixed(2);
+
+                summaryTableBody.innerHTML = `
+                    <tr>
+                        <td>1号线</td>
+                        <td>${lineSummary["1号线"].toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                        <td>2号线</td>
+                        <td>${lineSummary["2号线"].toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                        <td>3号线</td>
+                        <td>${lineSummary["3号线"].toFixed(2)}</td>
+                    </tr>
+                `;
+
+                detailTableBody.innerHTML = detailRows.length > 0
+                    ? detailRows.join("")
+                    : `<tr><td colspan="7">暂无可清分数据</td></tr>`;
+            } catch (error) {
+                console.error(error);
+                summaryTableBody.innerHTML = `<tr><td colspan="2">清分失败</td></tr>`;
+                detailTableBody.innerHTML = `<tr><td colspan="7">清分失败，请检查后端服务是否启动</td></tr>`;
+            }
+        }
+
+        window.onload = runClearing;
+    </script>
+}
