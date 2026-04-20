@@ -336,3 +336,16 @@ select {
         font-size: 15px;
     }
 }
+button.danger-btn,
+.danger-btn {
+    background: #d9534f;
+    color: #fff;
+    border: 1px solid #d9534f;
+}
+
+    button.danger-btn:hover,
+    .danger-btn:hover {
+        background: #c9302c;
+        border-color: #c9302c;
+        color: #fff;
+    }

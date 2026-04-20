@@ -9,7 +9,7 @@
         <h1>票务数据管理</h1>
         <p class="sub-text">查看当前数据库中的票务交易记录</p>
     </div>
-    <button onclick="loadTransactions()">加载数据库数据</button>
+    <button type="button" onclick="loadTransactions()">加载数据库数据</button>
 </div>
 
 <div class="panel">
@@ -21,7 +21,9 @@
             <tr>
                 <th>交易ID</th>
                 <th>卡号</th>
+                <th>进站时间</th>
                 <th>进站站点</th>
+                <th>出站时间</th>
                 <th>出站站点</th>
                 <th>支付金额</th>
                 <th>状态</th>
@@ -29,21 +31,43 @@
         </thead>
         <tbody id="transactionTableBody">
             <tr>
-                <td colspan="6">正在加载数据...</td>
+                <td colspan="8">正在加载数据...</td>
             </tr>
         </tbody>
     </table>
 </div>
 
+<div id="page-config" data-api-base-url="@Model.ApiBaseUrl"></div>
+
 @section Scripts {
     <script>
-        const apiBaseUrl = "https://localhost:7179/api";
+        const apiBaseUrl = document.getElementById("page-config").dataset.apiBaseUrl + "/api";
+
+        function formatDateTime(value) {
+            if (!value) {
+                return "-";
+            }
+
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) {
+                return value;
+            }
+
+            const yyyy = date.getFullYear();
+            const MM = String(date.getMonth() + 1).padStart(2, "0");
+            const dd = String(date.getDate()).padStart(2, "0");
+            const HH = String(date.getHours()).padStart(2, "0");
+            const mm = String(date.getMinutes()).padStart(2, "0");
+            const ss = String(date.getSeconds()).padStart(2, "0");
+
+            return `${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss}`;
+        }
 
         async function loadTransactions() {
             const tbody = document.getElementById("transactionTableBody");
             const message = document.getElementById("message");
 
-            tbody.innerHTML = `<tr><td colspan="6">正在加载数据...</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8">正在加载数据...</td></tr>`;
             message.textContent = "正在加载票务交易数据...";
 
             try {
@@ -56,7 +80,7 @@
                 const data = await response.json();
 
                 if (!data || data.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="6">暂无交易数据</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="8">暂无交易数据</td></tr>`;
                     message.textContent = "当前数据库中没有交易数据。";
                     return;
                 }
@@ -64,12 +88,14 @@
                 tbody.innerHTML = data.map(item => `
                     <tr>
                         <td>${item.transactionId}</td>
-                        <td>${item.cardNo}</td>
+                        <td>${item.cardNo ?? "-"}</td>
+                        <td>${formatDateTime(item.entryTime)}</td>
                         <td>${item.entryStationName ?? "无进站记录"}</td>
+                        <td>${formatDateTime(item.exitTime)}</td>
                         <td>${item.exitStationName ?? "无出站记录"}</td>
-                        <td>${Number(item.payAmount).toFixed(2)}</td>
+                        <td>${Number(item.payAmount ?? 0).toFixed(2)}</td>
                         <td class="${item.transactionStatus === 'EXCEPTION' ? 'danger-text' : 'success-text'}">
-                            ${item.transactionStatus}
+                            ${item.transactionStatus ?? "-"}
                         </td>
                     </tr>
                 `).join("");
@@ -77,7 +103,7 @@
                 message.textContent = `共加载 ${data.length} 条交易记录。`;
             } catch (error) {
                 console.error(error);
-                tbody.innerHTML = `<tr><td colspan="6">数据加载失败</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="8">数据加载失败</td></tr>`;
                 message.textContent = "无法连接后端接口，请检查后端服务是否启动。";
             }
         }

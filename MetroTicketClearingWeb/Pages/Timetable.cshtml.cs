@@ -1,6 +1,7 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 
 namespace MetroTicketClearingWeb.Pages
 {
@@ -22,6 +23,42 @@ namespace MetroTicketClearingWeb.Pages
         public List<TimetableDetailDto> Details { get; set; } = new();
 
         public string? ErrorMessage { get; set; }
+
+        [BindProperty]
+        public string TimetableCode { get; set; } = string.Empty;
+
+        [BindProperty]
+        public string TimetableName { get; set; } = string.Empty;
+
+        [BindProperty]
+        public long LineId { get; set; }
+
+        [BindProperty]
+        public int Direction { get; set; } = 1;
+
+        [BindProperty]
+        public string VersionNo { get; set; } = string.Empty;
+
+        [BindProperty]
+        [DataType(DataType.Date)]
+        public DateTime EffectiveStartDate { get; set; } = DateTime.Today;
+
+        [BindProperty]
+        [DataType(DataType.Date)]
+        public DateTime EffectiveEndDate { get; set; } = DateTime.Today.AddMonths(1);
+
+        [BindProperty]
+        public string RunCalendarType { get; set; } = "DAILY";
+
+        [BindProperty]
+        public string? Remark { get; set; }
+
+        [BindProperty]
+        public IFormFile? UploadFile { get; set; }
+
+        public string? ImportMessage { get; set; }
+
+        public bool ImportSuccess { get; set; }
 
         public async Task OnGetAsync()
         {
@@ -62,6 +99,108 @@ namespace MetroTicketClearingWeb.Pages
             }
 
             return RedirectToPage("/Timetable", new { TimetableId = timetableId });
+        }
+        public async Task<IActionResult> OnPostDeleteAsync(long timetableId)
+        {
+            var client = CreateApiClient();
+            var response = await client.PostAsync($"/api/timetables/{timetableId}/delete", null);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                ErrorMessage = $"删除失败，HTTP状态码：{(int)response.StatusCode}";
+                await LoadTimetablesAsync();
+
+                if (TimetableId.HasValue)
+                {
+                    await LoadDetailsAsync(TimetableId.Value);
+                }
+
+                return Page();
+            }
+
+            return RedirectToPage("/Timetable");
+        }
+
+        public async Task<IActionResult> OnPostImportAsync()
+        {
+            await LoadTimetablesAsync();
+
+            if (TimetableId.HasValue)
+            {
+                await LoadDetailsAsync(TimetableId.Value);
+            }
+
+            if (UploadFile == null || UploadFile.Length == 0)
+            {
+                ImportSuccess = false;
+                ImportMessage = "请选择要上传的 CSV 文件。";
+                return Page();
+            }
+
+            if (string.IsNullOrWhiteSpace(TimetableCode) ||
+                string.IsNullOrWhiteSpace(TimetableName) ||
+                string.IsNullOrWhiteSpace(VersionNo))
+            {
+                ImportSuccess = false;
+                ImportMessage = "时刻表编号、时刻表名称、版本号不能为空。";
+                return Page();
+            }
+
+            try
+            {
+                var client = CreateApiClient();
+
+                using var form = new MultipartFormDataContent();
+
+                form.Add(new StringContent(TimetableCode), "TimetableCode");
+                form.Add(new StringContent(TimetableName), "TimetableName");
+                form.Add(new StringContent(LineId.ToString()), "LineId");
+                form.Add(new StringContent(Direction.ToString()), "Direction");
+                form.Add(new StringContent(VersionNo), "VersionNo");
+                form.Add(new StringContent(EffectiveStartDate.ToString("yyyy-MM-dd")), "EffectiveStartDate");
+                form.Add(new StringContent(EffectiveEndDate.ToString("yyyy-MM-dd")), "EffectiveEndDate");
+                form.Add(new StringContent(RunCalendarType), "RunCalendarType");
+                form.Add(new StringContent(Remark ?? string.Empty), "Remark");
+
+                using var stream = UploadFile.OpenReadStream();
+                using var fileContent = new StreamContent(stream);
+                fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/csv");
+                form.Add(fileContent, "File", UploadFile.FileName);
+
+                var response = await client.PostAsync("/api/timetables/import", form);
+                var resultText = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    ImportSuccess = true;
+                    ImportMessage = $"导入成功：{resultText}";
+
+                    await LoadTimetablesAsync();
+
+                    var matched = Timetables
+                        .Where(t => t.LineId == LineId && t.Direction == Direction && t.VersionNo == VersionNo)
+                        .OrderByDescending(t => t.TimetableId)
+                        .FirstOrDefault();
+
+                    if (matched != null)
+                    {
+                        TimetableId = matched.TimetableId;
+                        await LoadDetailsAsync(matched.TimetableId);
+                    }
+                }
+                else
+                {
+                    ImportSuccess = false;
+                    ImportMessage = $"导入失败：{resultText}";
+                }
+            }
+            catch (Exception ex)
+            {
+                ImportSuccess = false;
+                ImportMessage = $"导入失败：{ex.Message}";
+            }
+
+            return Page();
         }
 
         private async Task LoadTimetablesAsync()
@@ -155,6 +294,7 @@ namespace MetroTicketClearingWeb.Pages
             public string TimetableCode { get; set; } = "";
             public string TimetableName { get; set; } = "";
             public long LineId { get; set; }
+            public string LineName { get; set; } = "";
             public int Direction { get; set; }
             public string DirectionText { get; set; } = "";
             public string VersionNo { get; set; } = "";

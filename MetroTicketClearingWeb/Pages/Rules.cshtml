@@ -23,59 +23,71 @@
         <option value="multi">多路径概率清分</option>
     </select>
 
-    <h3 class="section-title">换乘贡献系数</h3>
-    <input type="text" id="transferFactorInput" value="1.1">
+    <div id="transferFactorSection">
+        <h3 class="section-title">换乘贡献系数</h3>
+        <input type="text" id="transferFactorInput" value="1.1">
+    </div>
 
     <h3 class="section-title">规则说明</h3>
     <div class="rule-text">
         <p>1. 单次交易票价按照乘客实际最短路径总里程进行分段计价。</p>
         <p>2. 0 - 3 公里按 2 元计费，3 - 6 公里按 3 元计费，6 - 10 公里按 4 元计费，10 公里以上按 5 元计费。</p>
-        <p>3. 涉及换乘的交易，按各线路承担的里程比例进行清分。</p>
-        <p>4. 换乘站可结合换乘贡献系数进行加权分摊。</p>
+        <p>3. 最短路径清分模式下，涉及换乘的交易，可结合换乘贡献系数进行加权分摊。</p>
+        <p>4. 多路径概率清分模式下，按候选路径概率进行分摊，不使用换乘贡献系数。</p>
         <p>5. 异常交易按异常规则单独处理，不参与正常路径清分。</p>
     </div>
 
     <div id="saveMessage" class="message-text" style="margin-top: 16px;"></div>
 
     <div style="margin-top: 20px;">
-        <button onclick="saveRule()">保存规则</button>
+        <button type="button" onclick="saveRule()">保存规则</button>
     </div>
 </div>
 
 @section Scripts {
     <script>
-        function saveRule() {
-            const factorInput = document.getElementById("transferFactorInput");
+        function updateTransferFactorVisibility() {
             const clearingMode = document.getElementById("clearingMode").value;
-            const saveMessage = document.getElementById("saveMessage");
+            const transferFactorSection = document.getElementById("transferFactorSection");
 
-            const transferFactor = parseFloat(factorInput.value);
-
-            if (isNaN(transferFactor) || transferFactor <= 0) {
-                saveMessage.textContent = "保存失败：请输入大于 0 的有效换乘贡献系数。";
-                saveMessage.className = "message-text danger-text";
-                return;
-            }
-
-            localStorage.setItem("transferFactor", transferFactor.toString());
-            localStorage.setItem("clearingMode", clearingMode);
-
-            saveMessage.textContent = `规则已保存：换乘贡献系数 = ${transferFactor}，清分模式 = ${clearingMode === "shortest" ? "最短路径清分" : "多路径概率清分"}`;
-            saveMessage.className = "message-text success-text";
-            alert("规则保存成功！");
+            transferFactorSection.style.display = clearingMode === "multi" ? "none" : "block";
         }
 
-        window.onload = function () {
-            const savedFactor = localStorage.getItem("transferFactor");
-            const savedMode = localStorage.getItem("clearingMode");
+        function loadRule() {
+            const savedClearingMode = localStorage.getItem("clearingMode") || "shortest";
+            const savedTransferFactor = localStorage.getItem("transferFactor") || "1.1";
 
-            if (savedFactor) {
-                document.getElementById("transferFactorInput").value = savedFactor;
+            document.getElementById("clearingMode").value = savedClearingMode;
+            document.getElementById("transferFactorInput").value = savedTransferFactor;
+
+            updateTransferFactorVisibility();
+        }
+
+        function saveRule() {
+            const clearingMode = document.getElementById("clearingMode").value;
+            const transferFactorInput = document.getElementById("transferFactorInput").value.trim();
+            const saveMessage = document.getElementById("saveMessage");
+
+            if (clearingMode === "shortest") {
+                const transferFactor = parseFloat(transferFactorInput);
+                if (Number.isNaN(transferFactor) || transferFactor <= 0) {
+                    saveMessage.textContent = "保存失败：换乘贡献系数必须是大于 0 的数字。";
+                    return;
+                }
+
+                localStorage.setItem("transferFactor", transferFactorInput);
             }
 
-            if (savedMode) {
-                document.getElementById("clearingMode").value = savedMode;
-            }
-        };
+            localStorage.setItem("clearingMode", clearingMode);
+            saveMessage.textContent = "规则保存成功。";
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            loadRule();
+
+            document.getElementById("clearingMode").addEventListener("change", function () {
+                updateTransferFactorVisibility();
+            });
+        });
     </script>
 }

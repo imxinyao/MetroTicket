@@ -9,12 +9,13 @@
         <h1>清分结果展示</h1>
         <p class="sub-text">根据交易数据和规则参数进行模拟清分</p>
     </div>
-    <button onclick="runClearing()">执行清分</button>
+    <button type="button" onclick="runClearing()">执行清分</button>
 </div>
 
 <div class="panel">
     <h3>当前清分参数</h3>
     <div id="ruleInfo" class="message-text">正在读取规则参数...</div>
+    <div id="ruleDescription" class="sub-text" style="margin-top: 10px;"></div>
 </div>
 
 <div class="cards dashboard-cards">
@@ -59,41 +60,99 @@
                 <th>进站站点</th>
                 <th>出站站点</th>
                 <th>支付金额</th>
+                <th>路径摘要</th>
+                <th>换乘说明</th>
                 <th>清分线路</th>
                 <th>清分金额</th>
             </tr>
         </thead>
         <tbody id="detailTableBody">
             <tr>
-                <td colspan="7">点击“执行清分”后显示结果</td>
+                <td colspan="9">点击“执行清分”后显示结果</td>
             </tr>
         </tbody>
     </table>
 </div>
 
+<div id="page-config" data-api-base-url="@Model.ApiBaseUrl"></div>
+
 @section Scripts {
     <script>
-        const apiBaseUrl = "https://localhost:7179/api";
+        const apiBaseUrl = document.getElementById("page-config").dataset.apiBaseUrl + "/api";
 
-        const line1Stations = ["A站", "B站", "C站", "D站", "E站"];
-        const line2Stations = ["F站", "G站", "D站", "H站", "I站"];
-        const line3Stations = ["J站", "K站", "I站", "E站", "L站"];
+        let lineStationsMap = {};
+        let transferStationLines = {};
+        let lineNames = [];
+        let networkGraph = {};
 
-        const transferStationLines = {
-            "D站": ["1号线", "2号线"],
-            "E站": ["1号线", "3号线"],
-            "I站": ["2号线", "3号线"]
-        };
+        async function loadLineTopology() {
+            const response = await fetch(`${apiBaseUrl}/lines/topology`);
+            if (!response.ok) {
+                throw new Error(`线路拓扑接口请求失败：${response.status}`);
+            }
+
+            const topology = await response.json();
+
+            lineStationsMap = {};
+            transferStationLines = {};
+            lineNames = [];
+            networkGraph = {};
+
+            const stationLineMap = {};
+
+            topology.forEach(line => {
+                const lineName = line.lineName;
+                const stationNames = (line.stations || []).map(station => station.stationName);
+
+                lineNames.push(lineName);
+                lineStationsMap[lineName] = stationNames;
+
+                stationNames.forEach(stationName => {
+                    if (!stationLineMap[stationName]) {
+                        stationLineMap[stationName] = [];
+                    }
+                    stationLineMap[stationName].push(lineName);
+                });
+
+                for (let i = 0; i < stationNames.length; i++) {
+                    const current = stationNames[i];
+                    if (!networkGraph[current]) {
+                        networkGraph[current] = new Set();
+                    }
+
+                    if (i > 0) {
+                        networkGraph[current].add(stationNames[i - 1]);
+                    }
+                    if (i < stationNames.length - 1) {
+                        networkGraph[current].add(stationNames[i + 1]);
+                    }
+                }
+            });
+
+            Object.keys(stationLineMap).forEach(stationName => {
+                if (stationLineMap[stationName].length > 1) {
+                    transferStationLines[stationName] = stationLineMap[stationName];
+                }
+            });
+        }
 
         function getBelongLines(stationName) {
             const lines = [];
-            if (line1Stations.includes(stationName)) lines.push("1号线");
-            if (line2Stations.includes(stationName)) lines.push("2号线");
-            if (line3Stations.includes(stationName)) lines.push("3号线");
+            Object.keys(lineStationsMap).forEach(lineName => {
+                if ((lineStationsMap[lineName] || []).includes(stationName)) {
+                    lines.push(lineName);
+                }
+            });
             return lines;
         }
 
-        function normalizeAllocations(weights, amount) {
+        function getCommonLines(stationA, stationB) {
+            const aLines = getBelongLines(stationA);
+            const bLines = getBelongLines(stationB);
+            return aLines.filter(x => bLines.includes(x));
+        }
+
+        function normalizeFallbackWeights(weights, amount) {
             const totalWeight = Object.values(weights).reduce((sum, v) => sum + v, 0);
             const result = {};
             let allocated = 0;
@@ -113,7 +172,301 @@
             return result;
         }
 
+        function buildPathSegments(path) {
+            const segments = [];
+            if (!path || path.length < 2) {
+                return segments;
+            }
+
+            let currentLine = null;
+            let segmentStart = path[0];
+            let stationCount = 0;
+
+            for (let i = 0; i < path.length - 1; i++) {
+                const from = path[i];
+                const to = path[i + 1];
+                const candidateLines = getCommonLines(from, to);
+
+                if (candidateLines.length === 0) {
+                    continue;
+                }
+
+                const nextLine = currentLine && candidateLines.includes(currentLine)
+                    ? currentLine
+                    : candidateLines[0];
+
+                if (currentLine === null) {
+                    currentLine = nextLine;
+                    segmentStart = from;
+                    stationCount = 1;
+                } else if (nextLine === currentLine) {
+                    stationCount++;
+                } else {
+                    segments.push({
+                        line: currentLine,
+                        from: segmentStart,
+                        to: from,
+                        stationCount: stationCount
+                    });
+
+                    currentLine = nextLine;
+                    segmentStart = from;
+                    stationCount = 1;
+                }
+            }
+
+            if (currentLine !== null) {
+                segments.push({
+                    line: currentLine,
+                    from: segmentStart,
+                    to: path[path.length - 1],
+                    stationCount: stationCount
+                });
+            }
+
+            return segments;
+        }
+
+        function getTransferStations(path) {
+            const result = [];
+            if (!path || path.length < 3) {
+                return result;
+            }
+
+            for (let i = 1; i < path.length - 1; i++) {
+                const prev = path[i - 1];
+                const current = path[i];
+                const next = path[i + 1];
+
+                const prevLines = getCommonLines(prev, current);
+                const nextLines = getCommonLines(current, next);
+
+                const sameLine = prevLines.some(x => nextLines.includes(x));
+                if (!sameLine) {
+                    result.push(current);
+                }
+            }
+
+            return result;
+        }
+
+        function pathSignature(path) {
+            return path.join("->");
+        }
+
+        function findShortestDistance(start, end) {
+            if (!networkGraph[start] || !networkGraph[end]) {
+                return Number.MAX_SAFE_INTEGER;
+            }
+
+            const queue = [{ station: start, dist: 0 }];
+            const visited = new Set([start]);
+
+            while (queue.length > 0) {
+                const current = queue.shift();
+                if (current.station === end) {
+                    return current.dist;
+                }
+
+                for (const next of networkGraph[current.station]) {
+                    if (!visited.has(next)) {
+                        visited.add(next);
+                        queue.push({ station: next, dist: current.dist + 1 });
+                    }
+                }
+            }
+
+            return Number.MAX_SAFE_INTEGER;
+        }
+
+        function findCandidatePaths(start, end, maxExtraSteps = 2, maxPaths = 12) {
+            if (!networkGraph[start] || !networkGraph[end]) {
+                return [];
+            }
+
+            const shortestDistance = findShortestDistance(start, end);
+            if (shortestDistance === Number.MAX_SAFE_INTEGER) {
+                return [];
+            }
+
+            const maxDepth = shortestDistance + maxExtraSteps;
+            const results = [];
+            const seen = new Set();
+
+            function dfs(current, target, path, visited) {
+                if (results.length >= maxPaths) {
+                    return;
+                }
+
+                if (path.length - 1 > maxDepth) {
+                    return;
+                }
+
+                if (current === target) {
+                    const sign = pathSignature(path);
+                    if (!seen.has(sign)) {
+                        seen.add(sign);
+                        results.push([...path]);
+                    }
+                    return;
+                }
+
+                const neighbors = Array.from(networkGraph[current] || []);
+                for (const next of neighbors) {
+                    if (visited.has(next)) {
+                        continue;
+                    }
+
+                    visited.add(next);
+                    path.push(next);
+                    dfs(next, target, path, visited);
+                    path.pop();
+                    visited.delete(next);
+                }
+            }
+
+            dfs(start, end, [start], new Set([start]));
+            return results.sort((a, b) => a.length - b.length);
+        }
+
+        function calculatePathProbability(path, useTransferFactor, transferFactor) {
+            const segments = buildPathSegments(path);
+            const transferStations = getTransferStations(path);
+            const stationCount = Math.max(path.length - 1, 1);
+            const transferCount = transferStations.length;
+
+            let weight = 1 / stationCount;
+
+            if (useTransferFactor && transferCount > 0) {
+                weight *= Math.pow(1 / transferFactor, transferCount);
+            }
+
+            const longestSegment = segments.length > 0
+                ? Math.max(...segments.map(x => x.stationCount))
+                : 1;
+
+            weight *= (1 + longestSegment * 0.03);
+
+            return {
+                path,
+                segments,
+                transferStations,
+                stationCount,
+                transferCount,
+                weight
+            };
+        }
+
+        function normalizeAllocationsByPaths(pathInfos, amount) {
+            const totalWeight = pathInfos.reduce((sum, item) => sum + item.weight, 0);
+            if (totalWeight <= 0) {
+                return [];
+            }
+
+            const results = [];
+            let allocated = 0;
+
+            pathInfos.forEach((item, index) => {
+                let allocatedAmount;
+
+                if (index === pathInfos.length - 1) {
+                    allocatedAmount = +(amount - allocated).toFixed(2);
+                } else {
+                    allocatedAmount = +((amount * item.weight) / totalWeight).toFixed(2);
+                    allocated += allocatedAmount;
+                }
+
+                results.push({
+                    ...item,
+                    allocatedAmount: allocatedAmount
+                });
+            });
+
+            return results;
+        }
+
+        function buildPathText(pathInfo) {
+            if (!pathInfo || !pathInfo.segments || pathInfo.segments.length === 0) {
+                return "-";
+            }
+            return pathInfo.segments.map(seg => seg.line).join(" -> ");
+        }
+
+        function buildTransferText(pathInfo) {
+            if (!pathInfo || !pathInfo.transferStations || pathInfo.transferStations.length === 0) {
+                return "直达";
+            }
+            return `在 ${pathInfo.transferStations.join("、")} 换乘`;
+        }
+
         function calculateClearing(entryStation, exitStation, amount, transferFactor, clearingMode) {
+            if (!entryStation || !exitStation) {
+                return [];
+            }
+
+            if (entryStation === exitStation) {
+                const onlyLine = getBelongLines(entryStation)[0];
+                return onlyLine ? [{
+                    line: onlyLine,
+                    amount: amount,
+                    pathText: onlyLine,
+                    transferText: "同站进出"
+                }] : [];
+            }
+
+            const candidatePaths = findCandidatePaths(
+                entryStation,
+                exitStation,
+                clearingMode === "multi" ? 3 : 0,
+                clearingMode === "multi" ? 12 : 4
+            );
+
+            if (candidatePaths.length > 0) {
+                let selectedPaths = candidatePaths;
+
+                if (clearingMode === "shortest") {
+                    const minLength = Math.min(...candidatePaths.map(x => x.length));
+                    selectedPaths = candidatePaths.filter(x => x.length === minLength);
+                }
+
+                const useTransferFactor = clearingMode === "shortest";
+
+                const pathInfos = selectedPaths
+                    .map(path => calculatePathProbability(path, useTransferFactor, transferFactor))
+                    .filter(x => x.segments && x.segments.length > 0);
+
+                if (pathInfos.length > 0) {
+                    const normalizedPaths = normalizeAllocationsByPaths(pathInfos, amount);
+                    const results = [];
+
+                    normalizedPaths.forEach(pathInfo => {
+                        const totalStations = pathInfo.segments.reduce((sum, seg) => sum + seg.stationCount, 0) || 1;
+                        let allocated = 0;
+
+                        pathInfo.segments.forEach((seg, index) => {
+                            let segAmount;
+                            if (index === pathInfo.segments.length - 1) {
+                                segAmount = +(pathInfo.allocatedAmount - allocated).toFixed(2);
+                            } else {
+                                segAmount = +((pathInfo.allocatedAmount * seg.stationCount) / totalStations).toFixed(2);
+                                allocated += segAmount;
+                            }
+
+                            results.push({
+                                line: seg.line,
+                                amount: segAmount,
+                                pathText: buildPathText(pathInfo),
+                                transferText: buildTransferText(pathInfo)
+                            });
+                        });
+                    });
+
+                    if (results.length > 0) {
+                        return results;
+                    }
+                }
+            }
+
             const entryLines = getBelongLines(entryStation);
             const exitLines = getBelongLines(exitStation);
             const allLines = Array.from(new Set([...entryLines, ...exitLines]));
@@ -122,7 +475,12 @@
             const exitIsTransfer = transferStationLines[exitStation];
 
             if (allLines.length === 1) {
-                return [{ line: allLines[0], amount: amount }];
+                return [{
+                    line: allLines[0],
+                    amount: amount,
+                    pathText: allLines[0],
+                    transferText: "直达"
+                }];
             }
 
             let weights = {};
@@ -132,69 +490,64 @@
                     weights[line] = 1;
                 });
 
-                if (entryIsTransfer) {
-                    entryIsTransfer.forEach(line => {
-                        if (weights[line] !== undefined) {
-                            weights[line] *= transferFactor;
-                        }
-                    });
+                if (clearingMode === "shortest") {
+                    if (entryIsTransfer) {
+                        entryIsTransfer.forEach(line => {
+                            if (weights[line] !== undefined) {
+                                weights[line] *= transferFactor;
+                            }
+                        });
+                    }
+
+                    if (exitIsTransfer) {
+                        exitIsTransfer.forEach(line => {
+                            if (weights[line] !== undefined) {
+                                weights[line] *= transferFactor;
+                            }
+                        });
+                    }
                 }
 
-                if (exitIsTransfer) {
-                    exitIsTransfer.forEach(line => {
-                        if (weights[line] !== undefined) {
-                            weights[line] *= transferFactor;
-                        }
-                    });
-                }
-
-                if (clearingMode === "multi") {
-                    allLines.forEach(line => {
-                        weights[line] *= 1.05;
-                    });
-                }
-
-                const normalized = normalizeAllocations(weights, amount);
+                const normalized = normalizeFallbackWeights(weights, amount);
 
                 return allLines.map(line => ({
-                    line,
-                    amount: normalized[line]
+                    line: line,
+                    amount: normalized[line],
+                    pathText: allLines.join(" -> "),
+                    transferText: "兜底分配"
                 }));
             }
 
-            if (allLines.length === 3) {
-                weights = {
-                    "1号线": 0.4,
-                    "2号线": 0.3,
-                    "3号线": 0.3
-                };
+            if (allLines.length >= 3) {
+                allLines.forEach((line, index) => {
+                    weights[line] = index === 0 ? 0.4 : (0.6 / (allLines.length - 1));
+                });
 
-                if (entryIsTransfer) {
-                    entryIsTransfer.forEach(line => {
-                        if (weights[line] !== undefined) {
-                            weights[line] *= transferFactor;
-                        }
-                    });
+                if (clearingMode === "shortest") {
+                    if (entryIsTransfer) {
+                        entryIsTransfer.forEach(line => {
+                            if (weights[line] !== undefined) {
+                                weights[line] *= transferFactor;
+                            }
+                        });
+                    }
+
+                    if (exitIsTransfer) {
+                        exitIsTransfer.forEach(line => {
+                            if (weights[line] !== undefined) {
+                                weights[line] *= transferFactor;
+                            }
+                        });
+                    }
                 }
 
-                if (exitIsTransfer) {
-                    exitIsTransfer.forEach(line => {
-                        if (weights[line] !== undefined) {
-                            weights[line] *= transferFactor;
-                        }
-                    });
-                }
-
-                if (clearingMode === "multi") {
-                    weights["2号线"] *= 1.05;
-                    weights["3号线"] *= 1.05;
-                }
-
-                const normalized = normalizeAllocations(weights, amount);
+                const normalized = normalizeFallbackWeights(weights, amount);
 
                 return Object.keys(normalized).map(line => ({
-                    line,
-                    amount: normalized[line]
+                    line: line,
+                    amount: normalized[line],
+                    pathText: allLines.join(" -> "),
+                    transferText: "兜底分配"
                 }));
             }
 
@@ -205,15 +558,24 @@
             const summaryTableBody = document.getElementById("summaryTableBody");
             const detailTableBody = document.getElementById("detailTableBody");
             const ruleInfo = document.getElementById("ruleInfo");
+            const ruleDescription = document.getElementById("ruleDescription");
 
             const transferFactor = parseFloat(localStorage.getItem("transferFactor")) || 1.1;
             const clearingMode = localStorage.getItem("clearingMode") || "shortest";
 
-            ruleInfo.textContent = `当前换乘贡献系数：${transferFactor}；当前清分模式：${clearingMode === "shortest" ? "最短路径清分" : "多路径概率清分"}`;
+            if (clearingMode === "shortest") {
+                ruleInfo.textContent = `当前清分模式：最短路径清分；当前换乘贡献系数：${transferFactor}`;
+                ruleDescription.textContent = "说明：按最短路径进行清分；如涉及换乘，可结合换乘贡献系数进行加权分摊。";
+        } else {
+            ruleInfo.textContent = "当前清分模式：多路径概率清分";
+            ruleDescription.textContent = "说明：按候选路径概率进行分摊。";
+        }
 
             try {
                 summaryTableBody.innerHTML = `<tr><td colspan="2">正在计算...</td></tr>`;
-                detailTableBody.innerHTML = `<tr><td colspan="7">正在计算...</td></tr>`;
+                detailTableBody.innerHTML = `<tr><td colspan="9">正在计算...</td></tr>`;
+
+                await loadLineTopology();
 
                 const response = await fetch(`${apiBaseUrl}/transactions`);
                 if (!response.ok) {
@@ -221,7 +583,6 @@
                 }
 
                 const data = await response.json();
-
                 const normalTrades = data.filter(x => x.transactionStatus === "NORMAL");
                 const exceptionTrades = data.filter(x => x.transactionStatus === "EXCEPTION");
 
@@ -229,13 +590,13 @@
                 document.getElementById("exceptionTradeCount").textContent = exceptionTrades.length;
 
                 let totalClearingAmount = 0;
-                let lineSummary = {
-                    "1号线": 0,
-                    "2号线": 0,
-                    "3号线": 0
-                };
+                const lineSummary = {};
 
-                let detailRows = [];
+                lineNames.forEach(lineName => {
+                    lineSummary[lineName] = 0;
+                });
+
+                const detailRows = [];
 
                 normalTrades.forEach(item => {
                     const amount = Number(item.payAmount || 0);
@@ -250,7 +611,15 @@
                     );
 
                     clearingResults.forEach(result => {
-                        lineSummary[result.line] += result.amount;
+                        const safeAmount = Number(result.amount);
+
+                        if (lineSummary[result.line] === undefined) {
+                            lineSummary[result.line] = 0;
+                        }
+
+                        if (!Number.isNaN(safeAmount)) {
+                            lineSummary[result.line] += safeAmount;
+                        }
 
                         detailRows.push(`
                             <tr>
@@ -259,8 +628,10 @@
                                 <td>${item.entryStationName ?? "无进站记录"}</td>
                                 <td>${item.exitStationName ?? "无出站记录"}</td>
                                 <td>${amount.toFixed(2)}</td>
+                                <td>${result.pathText ?? "-"}</td>
+                                <td>${result.transferText ?? "-"}</td>
                                 <td>${result.line}</td>
-                                <td>${result.amount.toFixed(2)}</td>
+                                <td>${Number.isNaN(safeAmount) ? "-" : safeAmount.toFixed(2)}</td>
                             </tr>
                         `);
                     });
@@ -268,28 +639,22 @@
 
                 document.getElementById("totalClearingAmount").textContent = totalClearingAmount.toFixed(2);
 
-                summaryTableBody.innerHTML = `
-                    <tr>
-                        <td>1号线</td>
-                        <td>${lineSummary["1号线"].toFixed(2)}</td>
-                    </tr>
-                    <tr>
-                        <td>2号线</td>
-                        <td>${lineSummary["2号线"].toFixed(2)}</td>
-                    </tr>
-                    <tr>
-                        <td>3号线</td>
-                        <td>${lineSummary["3号线"].toFixed(2)}</td>
-                    </tr>
-                `;
+                summaryTableBody.innerHTML = lineNames.length > 0
+                    ? lineNames.map(lineName => `
+                        <tr>
+                            <td>${lineName}</td>
+                            <td>${(lineSummary[lineName] || 0).toFixed(2)}</td>
+                        </tr>
+                    `).join("")
+                    : `<tr><td colspan="2">暂无线路数据</td></tr>`;
 
                 detailTableBody.innerHTML = detailRows.length > 0
                     ? detailRows.join("")
-                    : `<tr><td colspan="7">暂无可清分数据</td></tr>`;
+                    : `<tr><td colspan="9">暂无可清分数据</td></tr>`;
             } catch (error) {
                 console.error(error);
                 summaryTableBody.innerHTML = `<tr><td colspan="2">清分失败</td></tr>`;
-                detailTableBody.innerHTML = `<tr><td colspan="7">清分失败，请检查后端服务是否启动</td></tr>`;
+                detailTableBody.innerHTML = `<tr><td colspan="9">清分失败，请检查后端服务是否启动</td></tr>`;
             }
         }
 

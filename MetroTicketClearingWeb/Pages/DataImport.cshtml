@@ -1,62 +1,96 @@
 ﻿@page
 @model MetroTicketClearingWeb.Pages.DataImportModel
 @{
-    ViewData["Title"] = "测试数据导入";
+    ViewData["Title"] = "时刻表导入";
 }
 
-<div class="container mt-4">
-    <h1 class="mb-4">地铁票务清分系统 - 测试数据导入</h1>
-
-    <div class="card">
-        <div class="card-body">
-            <p>点击下面按钮，将向数据库导入一批演示数据：</p>
-            <ul>
-                <li>运营主体</li>
-                <li>线路</li>
-                <li>车站</li>
-                <li>区间</li>
-                <li>票务交易</li>
-            </ul>
-
-            <form method="post">
-                <button type="submit" asp-page-handler="Import" class="btn btn-primary">
-                    一键导入测试数据
-                </button>
-                <a href="/DbCheck" class="btn btn-secondary ms-2">查看数据库检查页</a>
-            </form>
-        </div>
+<div class="page-header">
+    <div>
+        <h1>时刻表导入</h1>
+        <p class="sub-text">上传 CSV 文件，将时刻表主表与明细表写入数据库</p>
     </div>
+</div>
 
-    @if (!string.IsNullOrWhiteSpace(Model.Result.Message))
-    {
-        <div class="alert @(Model.Result.Success ? "alert-success" : "alert-danger") mt-4">
-            <strong>@Model.Result.Message</strong>
+<div class="panel">
+    <h3>导入参数</h3>
+
+    <form method="post" enctype="multipart/form-data" class="form-grid">
+        <div class="form-row">
+            <label asp-for="TimetableCode">时刻表编号</label>
+            <input asp-for="TimetableCode" />
         </div>
 
-        @if (Model.Result.Success)
-        {
-            <div class="card mt-3">
-                <div class="card-header">
-                    <strong>导入结果</strong>
-                </div>
-                <div class="card-body">
-                    <table class="table table-bordered">
-                        <thead>
-                            <tr>
-                                <th>表名</th>
-                                <th>记录数</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr><td>operator_info</td><td>@Model.Result.OperatorCount</td></tr>
-                            <tr><td>line_info</td><td>@Model.Result.LineCount</td></tr>
-                            <tr><td>station_info</td><td>@Model.Result.StationCount</td></tr>
-                            <tr><td>section_info</td><td>@Model.Result.SectionCount</td></tr>
-                            <tr><td>ticket_transaction</td><td>@Model.Result.TransactionCount</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        }
+        <div class="form-row">
+            <label asp-for="TimetableName">时刻表名称</label>
+            <input asp-for="TimetableName" />
+        </div>
+
+        <div class="form-row">
+            <label asp-for="LineId">线路 ID</label>
+            <input asp-for="LineId" type="number" min="1" />
+        </div>
+
+        <div class="form-row">
+            <label asp-for="Direction">方向</label>
+            <select asp-for="Direction">
+                <option value="1">上行</option>
+                <option value="2">下行</option>
+            </select>
+        </div>
+
+        <div class="form-row">
+            <label asp-for="VersionNo">版本号</label>
+            <input asp-for="VersionNo" />
+        </div>
+
+        <div class="form-row">
+            <label asp-for="EffectiveStartDate">生效开始日期</label>
+            <input asp-for="EffectiveStartDate" type="date" />
+        </div>
+
+        <div class="form-row">
+            <label asp-for="EffectiveEndDate">生效结束日期</label>
+            <input asp-for="EffectiveEndDate" type="date" />
+        </div>
+
+        <div class="form-row">
+            <label asp-for="RunCalendarType">运行日类型</label>
+            <select asp-for="RunCalendarType">
+                <option value="DAILY">DAILY</option>
+                <option value="WEEKDAY">WEEKDAY</option>
+                <option value="WEEKEND">WEEKEND</option>
+            </select>
+        </div>
+
+        <div class="form-row form-row-full">
+            <label asp-for="Remark">备注</label>
+            <input asp-for="Remark" />
+        </div>
+
+        <div class="form-row form-row-full">
+            <label asp-for="UploadFile">CSV 文件</label>
+            <input asp-for="UploadFile" type="file" accept=".csv" />
+        </div>
+
+        <div class="form-row form-row-full">
+            <button type="submit">开始导入</button>
+        </div>
+    </form>
+
+    @if (!string.IsNullOrWhiteSpace(Model.Message))
+    {
+        <div class="message-text" style="margin-top:16px;">
+            @Model.Message
+        </div>
     }
 </div>
+
+<div class="panel">
+    <h3>CSV 格式要求</h3>
+    <pre>train_no,station_code,station_seq,arrival_time,departure_time,stop_minutes,is_origin_station,is_terminal_station
+        L1-001,A,1,,06:00:00,0,1,0
+        L1-001,B,2,06:05:00,06:06:00,1,0,0
+        L1-001,C,3,06:10:00,06:11:00,1,0,0
+        L1-001,D,4,06:15:00,06:16:00,1,0,0
+        L1-001,E,5,06:20:00,,0,0,1</pre>
+    </div>
