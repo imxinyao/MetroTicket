@@ -51,7 +51,11 @@
 </div>
 
 <div class="panel">
-    <h3>清分结果明细</h3>
+    <h3>交易清分总览</h3>
+    <div class="sub-text" style="margin-bottom:12px;">
+        说明：每笔交易只显示一行。“路径方案数”表示候选方案个数，“线路分摊条数”表示展开后涉及的线路金额拆分记录数。点击“查看明细”可在当前交易下方展开具体分摊结果。
+    </div>
+
     <table>
         <thead>
             <tr>
@@ -60,15 +64,14 @@
                 <th>进站站点</th>
                 <th>出站站点</th>
                 <th>支付金额</th>
-                <th>路径摘要</th>
-                <th>换乘说明</th>
-                <th>清分线路</th>
-                <th>清分金额</th>
+                <th>路径方案数</th>
+                <th>线路分摊条数</th>
+                <th>操作</th>
             </tr>
         </thead>
-        <tbody id="detailTableBody">
+        <tbody id="tradeTableBody">
             <tr>
-                <td colspan="9">点击“执行清分”后显示结果</td>
+                <td colspan="8">点击“执行清分”后显示结果</td>
             </tr>
         </tbody>
     </table>
@@ -84,6 +87,8 @@
         let transferStationLines = {};
         let lineNames = [];
         let networkGraph = {};
+        let tradeDetailMap = {};
+        let currentExpandedTradeId = null;
 
         async function loadLineTopology() {
             const response = await fetch(`${apiBaseUrl}/lines/topology`);
@@ -386,17 +391,19 @@
         }
 
         function buildPathText(pathInfo) {
-            if (!pathInfo || !pathInfo.segments || pathInfo.segments.length === 0) {
+            if (!pathInfo || !pathInfo.path || pathInfo.path.length === 0) {
                 return "-";
             }
-            return pathInfo.segments.map(seg => seg.line).join(" -> ");
+
+            return pathInfo.path.map(station => `${station}`).join(" -> ");
         }
 
         function buildTransferText(pathInfo) {
             if (!pathInfo || !pathInfo.transferStations || pathInfo.transferStations.length === 0) {
                 return "直达";
             }
-            return `在 ${pathInfo.transferStations.join("、")} 换乘`;
+
+            return `${pathInfo.transferStations.map(station => `${station}`).join("、")}换乘`;
         }
 
         function calculateClearing(entryStation, exitStation, amount, transferFactor, clearingMode) {
@@ -410,7 +417,8 @@
                     line: onlyLine,
                     amount: amount,
                     pathText: onlyLine,
-                    transferText: "同站进出"
+                    transferText: "同站进出",
+                    pathGroup: "方案1"
                 }] : [];
             }
 
@@ -439,7 +447,7 @@
                     const normalizedPaths = normalizeAllocationsByPaths(pathInfos, amount);
                     const results = [];
 
-                    normalizedPaths.forEach(pathInfo => {
+                    normalizedPaths.forEach((pathInfo, pathIndex) => {
                         const totalStations = pathInfo.segments.reduce((sum, seg) => sum + seg.stationCount, 0) || 1;
                         let allocated = 0;
 
@@ -456,7 +464,8 @@
                                 line: seg.line,
                                 amount: segAmount,
                                 pathText: buildPathText(pathInfo),
-                                transferText: buildTransferText(pathInfo)
+                                transferText: buildTransferText(pathInfo),
+                                pathGroup: `方案${pathIndex + 1}`
                             });
                         });
                     });
@@ -479,7 +488,8 @@
                     line: allLines[0],
                     amount: amount,
                     pathText: allLines[0],
-                    transferText: "直达"
+                    transferText: "直达",
+                    pathGroup: "方案1"
                 }];
             }
 
@@ -514,7 +524,8 @@
                     line: line,
                     amount: normalized[line],
                     pathText: allLines.join(" -> "),
-                    transferText: "兜底分配"
+                    transferText: "兜底分配",
+                    pathGroup: "方案1"
                 }));
             }
 
@@ -547,18 +558,156 @@
                     line: line,
                     amount: normalized[line],
                     pathText: allLines.join(" -> "),
-                    transferText: "兜底分配"
+                    transferText: "兜底分配",
+                    pathGroup: "方案1"
                 }));
             }
 
             return [];
         }
 
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#39;");
+        }
+
+        function groupRowsByPath(rows) {
+            const groups = {};
+            rows.forEach(row => {
+                const key = row.pathGroup || "方案1";
+                if (!groups[key]) {
+                    groups[key] = [];
+                }
+                groups[key].push(row);
+            });
+            return groups;
+        }
+
+        function buildDetailMergedTable(rows) {
+            if (!rows || rows.length === 0) {
+                return `<div class="sub-text">该交易暂无清分明细。</div>`;
+            }
+
+            const groups = groupRowsByPath(rows);
+            const groupNames = Object.keys(groups);
+
+            let html = `
+                <div style="padding:12px 0 4px 0;">
+                    <strong>清分明细</strong>
+                </div>
+                <table style="margin-top:8px;">
+                    <thead>
+                        <tr>
+                            <th>路径方案</th>
+                            <th>路径摘要</th>
+                            <th>换乘说明</th>
+                            <th>清分线路</th>
+                            <th>清分金额</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            groupNames.forEach(groupName => {
+                const items = groups[groupName];
+
+                items.forEach((item, index) => {
+                    html += `<tr>`;
+
+                    if (index === 0) {
+                        html += `<td rowspan="${items.length}">${escapeHtml(groupName)}</td>`;
+                        html += `<td rowspan="${items.length}">${escapeHtml(item.pathText)}</td>`;
+                        html += `<td rowspan="${items.length}">${escapeHtml(item.transferText)}</td>`;
+                    }
+
+                    html += `<td>${escapeHtml(item.line)}</td>`;
+                    html += `<td>${Number(item.amount || 0).toFixed(2)}</td>`;
+                    html += `</tr>`;
+                });
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+
+            return html;
+        }
+
+        function collapseCurrentDetail() {
+            if (currentExpandedTradeId === null) {
+                return;
+            }
+
+            const oldDetailRow = document.getElementById(`detail-row-${currentExpandedTradeId}`);
+            const oldButton = document.getElementById(`toggle-btn-${currentExpandedTradeId}`);
+            const oldMainRow = document.getElementById(`trade-row-${currentExpandedTradeId}`);
+
+            if (oldDetailRow) {
+                oldDetailRow.remove();
+            }
+
+            if (oldButton) {
+                oldButton.textContent = "查看明细";
+            }
+
+            if (oldMainRow) {
+                oldMainRow.style.backgroundColor = "";
+            }
+
+            currentExpandedTradeId = null;
+        }
+
+        function toggleTradeDetails(transactionId) {
+            const targetDetailRow = document.getElementById(`detail-row-${transactionId}`);
+            const targetButton = document.getElementById(`toggle-btn-${transactionId}`);
+            const targetMainRow = document.getElementById(`trade-row-${transactionId}`);
+
+            if (targetDetailRow) {
+                collapseCurrentDetail();
+                return;
+            }
+
+            collapseCurrentDetail();
+
+            const rows = tradeDetailMap[transactionId] || [];
+            const insertRow = document.createElement("tr");
+            insertRow.id = `detail-row-${transactionId}`;
+
+            insertRow.innerHTML = `
+                <td colspan="8" style="background:#f8fbff; padding:16px;">
+                    <div style="margin-bottom:10px;">
+                        <strong>当前交易：</strong>${transactionId}
+                    </div>
+                    ${buildDetailMergedTable(rows)}
+                </td>
+            `;
+
+            targetMainRow.insertAdjacentElement("afterend", insertRow);
+
+            if (targetButton) {
+                targetButton.textContent = "收起明细";
+            }
+
+            if (targetMainRow) {
+                targetMainRow.style.backgroundColor = "#eef5ff";
+            }
+
+            currentExpandedTradeId = transactionId;
+        }
+
         async function runClearing() {
             const summaryTableBody = document.getElementById("summaryTableBody");
-            const detailTableBody = document.getElementById("detailTableBody");
+            const tradeTableBody = document.getElementById("tradeTableBody");
             const ruleInfo = document.getElementById("ruleInfo");
             const ruleDescription = document.getElementById("ruleDescription");
+
+            collapseCurrentDetail();
+            tradeDetailMap = {};
 
             const transferFactor = parseFloat(localStorage.getItem("transferFactor")) || 1.1;
             const clearingMode = localStorage.getItem("clearingMode") || "shortest";
@@ -566,14 +715,14 @@
             if (clearingMode === "shortest") {
                 ruleInfo.textContent = `当前清分模式：最短路径清分；当前换乘贡献系数：${transferFactor}`;
                 ruleDescription.textContent = "说明：按最短路径进行清分；如涉及换乘，可结合换乘贡献系数进行加权分摊。";
-        } else {
-            ruleInfo.textContent = "当前清分模式：多路径概率清分";
-            ruleDescription.textContent = "说明：按候选路径概率进行分摊。";
-        }
+            } else {
+                ruleInfo.textContent = "当前清分模式：多路径概率清分";
+                ruleDescription.textContent = "说明：按候选路径概率进行分摊，不使用换乘贡献系数。";
+            }
 
             try {
                 summaryTableBody.innerHTML = `<tr><td colspan="2">正在计算...</td></tr>`;
-                detailTableBody.innerHTML = `<tr><td colspan="9">正在计算...</td></tr>`;
+                tradeTableBody.innerHTML = `<tr><td colspan="8">正在计算...</td></tr>`;
 
                 await loadLineTopology();
 
@@ -596,7 +745,7 @@
                     lineSummary[lineName] = 0;
                 });
 
-                const detailRows = [];
+                const tradeRows = [];
 
                 normalTrades.forEach(item => {
                     const amount = Number(item.payAmount || 0);
@@ -610,7 +759,9 @@
                         clearingMode
                     );
 
-                    clearingResults.forEach(result => {
+                    const tradeId = item.transactionId;
+
+                    tradeDetailMap[tradeId] = clearingResults.map(result => {
                         const safeAmount = Number(result.amount);
 
                         if (lineSummary[result.line] === undefined) {
@@ -621,20 +772,38 @@
                             lineSummary[result.line] += safeAmount;
                         }
 
-                        detailRows.push(`
-                            <tr>
-                                <td>${item.transactionId}</td>
-                                <td>${item.cardNo}</td>
-                                <td>${item.entryStationName ?? "无进站记录"}</td>
-                                <td>${item.exitStationName ?? "无出站记录"}</td>
-                                <td>${amount.toFixed(2)}</td>
-                                <td>${result.pathText ?? "-"}</td>
-                                <td>${result.transferText ?? "-"}</td>
-                                <td>${result.line}</td>
-                                <td>${Number.isNaN(safeAmount) ? "-" : safeAmount.toFixed(2)}</td>
-                            </tr>
-                        `);
+                        return {
+                            transactionId: tradeId,
+                            cardNo: item.cardNo ?? "-",
+                            entryStationName: item.entryStationName ?? "无进站记录",
+                            exitStationName: item.exitStationName ?? "无出站记录",
+                            payAmount: amount,
+                            pathGroup: result.pathGroup ?? "方案1",
+                            pathText: result.pathText ?? "-",
+                            transferText: result.transferText ?? "-",
+                            line: result.line ?? "-",
+                            amount: Number.isNaN(safeAmount) ? 0 : safeAmount
+                        };
                     });
+
+                    const detailRows = tradeDetailMap[tradeId];
+                    const pathSchemeCount = new Set(detailRows.map(x => x.pathGroup)).size;
+                    const lineAllocationCount = detailRows.length;
+
+                    tradeRows.push(`
+                        <tr id="trade-row-${tradeId}">
+                            <td>${tradeId}</td>
+                            <td>${escapeHtml(item.cardNo ?? "-")}</td>
+                            <td>${escapeHtml(item.entryStationName ?? "无进站记录")}</td>
+                            <td>${escapeHtml(item.exitStationName ?? "无出站记录")}</td>
+                            <td>${amount.toFixed(2)}</td>
+                            <td>${pathSchemeCount}</td>
+                            <td>${lineAllocationCount}</td>
+                            <td>
+                                <button type="button" id="toggle-btn-${tradeId}" onclick="toggleTradeDetails(${tradeId})">查看明细</button>
+                            </td>
+                        </tr>
+                    `);
                 });
 
                 document.getElementById("totalClearingAmount").textContent = totalClearingAmount.toFixed(2);
@@ -642,19 +811,19 @@
                 summaryTableBody.innerHTML = lineNames.length > 0
                     ? lineNames.map(lineName => `
                         <tr>
-                            <td>${lineName}</td>
+                            <td>${escapeHtml(lineName)}</td>
                             <td>${(lineSummary[lineName] || 0).toFixed(2)}</td>
                         </tr>
                     `).join("")
                     : `<tr><td colspan="2">暂无线路数据</td></tr>`;
 
-                detailTableBody.innerHTML = detailRows.length > 0
-                    ? detailRows.join("")
-                    : `<tr><td colspan="9">暂无可清分数据</td></tr>`;
+                tradeTableBody.innerHTML = tradeRows.length > 0
+                    ? tradeRows.join("")
+                    : `<tr><td colspan="8">暂无可清分数据</td></tr>`;
             } catch (error) {
                 console.error(error);
                 summaryTableBody.innerHTML = `<tr><td colspan="2">清分失败</td></tr>`;
-                detailTableBody.innerHTML = `<tr><td colspan="9">清分失败，请检查后端服务是否启动</td></tr>`;
+                tradeTableBody.innerHTML = `<tr><td colspan="8">清分失败，请检查后端服务是否启动</td></tr>`;
             }
         }
 

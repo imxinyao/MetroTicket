@@ -22,6 +22,10 @@ namespace MetroTicketClearingWeb.Pages
         public List<TimetableHeaderDto> Timetables { get; set; } = new();
         public List<TimetableDetailDto> Details { get; set; } = new();
 
+        public TimetableHeaderDto? SelectedTimetable { get; set; }
+
+        public List<TimetableTrainGroupDto> GroupedDetails { get; set; } = new();
+
         public string? ErrorMessage { get; set; }
 
         [BindProperty]
@@ -70,9 +74,16 @@ namespace MetroTicketClearingWeb.Pages
             }
             else if (Timetables.Count > 0)
             {
-                TimetableId = Timetables[0].TimetableId;
+                TimetableId = Timetables
+                    .OrderBy(t => t.TimetableId)
+                    .First()
+                    .TimetableId;
+
                 await LoadDetailsAsync(TimetableId.Value);
             }
+
+            BuildSelectedTimetable();
+            BuildGroupedDetails();
         }
 
         public async Task<IActionResult> OnPostPublishAsync(long timetableId)
@@ -100,6 +111,7 @@ namespace MetroTicketClearingWeb.Pages
 
             return RedirectToPage("/Timetable", new { TimetableId = timetableId });
         }
+
         public async Task<IActionResult> OnPostDeleteAsync(long timetableId)
         {
             var client = CreateApiClient();
@@ -115,6 +127,8 @@ namespace MetroTicketClearingWeb.Pages
                     await LoadDetailsAsync(TimetableId.Value);
                 }
 
+                BuildSelectedTimetable();
+                BuildGroupedDetails();
                 return Page();
             }
 
@@ -134,6 +148,8 @@ namespace MetroTicketClearingWeb.Pages
             {
                 ImportSuccess = false;
                 ImportMessage = "请选择要上传的 CSV 文件。";
+                BuildSelectedTimetable();
+                BuildGroupedDetails();
                 return Page();
             }
 
@@ -143,6 +159,8 @@ namespace MetroTicketClearingWeb.Pages
             {
                 ImportSuccess = false;
                 ImportMessage = "时刻表编号、时刻表名称、版本号不能为空。";
+                BuildSelectedTimetable();
+                BuildGroupedDetails();
                 return Page();
             }
 
@@ -200,6 +218,8 @@ namespace MetroTicketClearingWeb.Pages
                 ImportMessage = $"导入失败：{ex.Message}";
             }
 
+            BuildSelectedTimetable();
+            BuildGroupedDetails();
             return Page();
         }
 
@@ -252,11 +272,53 @@ namespace MetroTicketClearingWeb.Pages
                 };
 
                 Details = JsonSerializer.Deserialize<List<TimetableDetailDto>>(json, options) ?? new List<TimetableDetailDto>();
+
+                Details = Details
+                    .OrderBy(d => d.TrainNo)
+                    .ThenBy(d => d.StationSeq)
+                    .ToList();
             }
             catch (Exception ex)
             {
                 ErrorMessage = $"加载时刻表明细异常：{ex.Message}";
             }
+        }
+
+        private void BuildSelectedTimetable()
+        {
+            if (!TimetableId.HasValue || Timetables.Count == 0)
+            {
+                SelectedTimetable = null;
+                return;
+            }
+
+            SelectedTimetable = Timetables
+                .FirstOrDefault(t => t.TimetableId == TimetableId.Value);
+        }
+
+        private void BuildGroupedDetails()
+        {
+            GroupedDetails = Details
+                .GroupBy(d => d.TrainNo ?? string.Empty)
+                .OrderBy(g => g.Key)
+                .Select(g =>
+                {
+                    var items = g
+                        .OrderBy(x => x.StationSeq)
+                        .ToList();
+
+                    var startStation = items.FirstOrDefault()?.StationName ?? "-";
+                    var endStation = items.LastOrDefault()?.StationName ?? "-";
+
+                    return new TimetableTrainGroupDto
+                    {
+                        TrainNo = string.IsNullOrWhiteSpace(g.Key) ? "未命名车次" : g.Key,
+                        StartStationName = startStation,
+                        EndStationName = endStation,
+                        Items = items
+                    };
+                })
+                .ToList();
         }
 
         private HttpClient CreateApiClient()
@@ -327,6 +389,14 @@ namespace MetroTicketClearingWeb.Pages
             public string OriginText { get; set; } = "";
             public string TerminalText { get; set; } = "";
             public DateTime CreatedAt { get; set; }
+        }
+
+        public class TimetableTrainGroupDto
+        {
+            public string TrainNo { get; set; } = "";
+            public string StartStationName { get; set; } = "-";
+            public string EndStationName { get; set; } = "-";
+            public List<TimetableDetailDto> Items { get; set; } = new();
         }
     }
 }

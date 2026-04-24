@@ -14,10 +14,8 @@ body {
     color: #333;
     line-height: 1.6;
 }
+/* ========================= 侧栏 ========================= */
 
-/* =========================
-   侧栏
-   ========================= */
 .sidebar {
     position: fixed;
     top: 0;
@@ -52,8 +50,7 @@ body {
             padding: 0;
         }
 
-            .sidebar ul li a,
-            .sidebar .nav-link-custom {
+            .sidebar ul li a, .sidebar .nav-link-custom {
                 display: block;
                 width: 100%;
                 color: #dbe7f3;
@@ -66,17 +63,12 @@ body {
                 transition: background-color 0.2s ease, color 0.2s ease;
             }
 
-                .sidebar ul li a:hover,
-                .sidebar ul li a.active,
-                .sidebar .nav-link-custom:hover,
-                .sidebar .nav-link-custom.active {
+                .sidebar ul li a:hover, .sidebar ul li a.active, .sidebar .nav-link-custom:hover, .sidebar .nav-link-custom.active {
                     background-color: rgba(255, 255, 255, 0.12);
                     color: #4db6ff;
                 }
+/* ========================= 主体区域 ========================= */
 
-/* =========================
-   主体区域
-   ========================= */
 .main {
     margin-left: 220px;
     min-height: 100vh;
@@ -97,8 +89,7 @@ body {
     gap: 16px;
 }
 
-    .page-header h1,
-    .header h1 {
+    .page-header h1, .header h1 {
         margin: 0 0 6px 0;
         font-size: 30px;
         font-weight: 700;
@@ -110,10 +101,8 @@ body {
     font-size: 15px;
     line-height: 1.7;
 }
+/* ========================= 卡片 ========================= */
 
-/* =========================
-   卡片
-   ========================= */
 .cards {
     display: flex;
     gap: 20px;
@@ -146,10 +135,8 @@ body {
         color: #0078d7;
         font-weight: bold;
     }
+/* ========================= 面板 ========================= */
 
-/* =========================
-   面板
-   ========================= */
 .panel {
     background: #fff;
     padding: 22px;
@@ -189,18 +176,15 @@ body {
     margin-top: 24px;
     margin-bottom: 8px;
 }
+/* ========================= 表格 ========================= */
 
-/* =========================
-   表格
-   ========================= */
 table {
     width: 100%;
     border-collapse: collapse;
     background: #fff;
 }
 
-    table th,
-    table td {
+    table th, table td {
         border: 1px solid #ddd;
         padding: 12px 14px;
         text-align: center;
@@ -222,10 +206,8 @@ table {
     table tr:nth-child(even) {
         background-color: #fafafa;
     }
+/* ========================= 表单控件 ========================= */
 
-/* =========================
-   表单控件
-   ========================= */
 button {
     background-color: #0078d7;
     color: #fff;
@@ -241,23 +223,19 @@ button {
         background-color: #005fa3;
     }
 
-input,
-select {
+input, select {
     padding: 8px 10px;
     width: 240px;
     font-size: 15px;
     height: 40px;
 }
 
-.panel select,
-.panel input {
+.panel select, .panel input {
     margin-top: 8px;
     margin-bottom: 4px;
 }
+/* ========================= 链接按钮 ========================= */
 
-/* =========================
-   链接按钮
-   ========================= */
 .action-link-btn {
     display: inline-block;
     background-color: #0078d7;
@@ -275,10 +253,8 @@ select {
         color: #fff !important;
         text-decoration: none;
     }
+/* ========================= 状态文字 ========================= */
 
-/* =========================
-   状态文字
-   ========================= */
 .success-text {
     color: #16a34a !important;
 }
@@ -286,10 +262,8 @@ select {
 .danger-text {
     color: #dc2626 !important;
 }
+/* ========================= 响应式 ========================= */
 
-/* =========================
-   响应式
-   ========================= */
 @media (max-width: 900px) {
     .sidebar {
         width: 200px;
@@ -299,8 +273,7 @@ select {
             font-size: 22px;
         }
 
-        .sidebar ul li a,
-        .sidebar .nav-link-custom {
+        .sidebar ul li a, .sidebar .nav-link-custom {
             font-size: 16px;
             padding: 12px 18px;
         }
@@ -319,8 +292,7 @@ select {
         flex-direction: column;
     }
 
-    .page-header h1,
-    .header h1 {
+    .page-header h1, .header h1 {
         font-size: 26px;
     }
 
@@ -336,15 +308,14 @@ select {
         font-size: 15px;
     }
 }
-button.danger-btn,
-.danger-btn {
+
+button.danger-btn, .danger-btn {
     background: #d9534f;
     color: #fff;
     border: 1px solid #d9534f;
 }
 
-    button.danger-btn:hover,
-    .danger-btn:hover {
+    button.danger-btn:hover, .danger-btn:hover {
         background: #c9302c;
         border-color: #c9302c;
         color: #fff;
