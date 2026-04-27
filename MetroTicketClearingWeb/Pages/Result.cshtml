@@ -7,15 +7,17 @@
 <div class="header page-header">
     <div>
         <h1>清分结果展示</h1>
-        <p class="sub-text">根据交易数据和规则参数进行模拟清分</p>
+        <p class="sub-text">根据交易数据和规则参数进行后端清分</p>
     </div>
-    <button type="button" onclick="runClearing()">执行清分</button>
+    <button type="button" onclick="runClearing()">执行/刷新清分</button>
 </div>
 
 <div class="panel">
     <h3>当前清分参数</h3>
-    <div id="ruleInfo" class="message-text">正在读取规则参数...</div>
-    <div id="ruleDescription" class="sub-text" style="margin-top: 10px;"></div>
+    <div id="ruleInfo" class="message-text">点击“执行清分”后读取后端规则参数。</div>
+    <div id="ruleDescription" class="sub-text" style="margin-top: 10px;">
+        说明：当前页面只负责展示，清分算法由后端接口执行并写入数据库。
+    </div>
 </div>
 
 <div class="cards dashboard-cards">
@@ -83,488 +85,8 @@
     <script>
         const apiBaseUrl = document.getElementById("page-config").dataset.apiBaseUrl + "/api";
 
-        let lineStationsMap = {};
-        let transferStationLines = {};
-        let lineNames = [];
-        let networkGraph = {};
         let tradeDetailMap = {};
         let currentExpandedTradeId = null;
-
-        async function loadLineTopology() {
-            const response = await fetch(`${apiBaseUrl}/lines/topology`);
-            if (!response.ok) {
-                throw new Error(`线路拓扑接口请求失败：${response.status}`);
-            }
-
-            const topology = await response.json();
-
-            lineStationsMap = {};
-            transferStationLines = {};
-            lineNames = [];
-            networkGraph = {};
-
-            const stationLineMap = {};
-
-            topology.forEach(line => {
-                const lineName = line.lineName;
-                const stationNames = (line.stations || []).map(station => station.stationName);
-
-                lineNames.push(lineName);
-                lineStationsMap[lineName] = stationNames;
-
-                stationNames.forEach(stationName => {
-                    if (!stationLineMap[stationName]) {
-                        stationLineMap[stationName] = [];
-                    }
-                    stationLineMap[stationName].push(lineName);
-                });
-
-                for (let i = 0; i < stationNames.length; i++) {
-                    const current = stationNames[i];
-                    if (!networkGraph[current]) {
-                        networkGraph[current] = new Set();
-                    }
-
-                    if (i > 0) {
-                        networkGraph[current].add(stationNames[i - 1]);
-                    }
-                    if (i < stationNames.length - 1) {
-                        networkGraph[current].add(stationNames[i + 1]);
-                    }
-                }
-            });
-
-            Object.keys(stationLineMap).forEach(stationName => {
-                if (stationLineMap[stationName].length > 1) {
-                    transferStationLines[stationName] = stationLineMap[stationName];
-                }
-            });
-        }
-
-        function getBelongLines(stationName) {
-            const lines = [];
-            Object.keys(lineStationsMap).forEach(lineName => {
-                if ((lineStationsMap[lineName] || []).includes(stationName)) {
-                    lines.push(lineName);
-                }
-            });
-            return lines;
-        }
-
-        function getCommonLines(stationA, stationB) {
-            const aLines = getBelongLines(stationA);
-            const bLines = getBelongLines(stationB);
-            return aLines.filter(x => bLines.includes(x));
-        }
-
-        function normalizeFallbackWeights(weights, amount) {
-            const totalWeight = Object.values(weights).reduce((sum, v) => sum + v, 0);
-            const result = {};
-            let allocated = 0;
-            const keys = Object.keys(weights);
-
-            keys.forEach((key, index) => {
-                let value;
-                if (index === keys.length - 1) {
-                    value = +(amount - allocated).toFixed(2);
-                } else {
-                    value = +((amount * weights[key]) / totalWeight).toFixed(2);
-                    allocated += value;
-                }
-                result[key] = value;
-            });
-
-            return result;
-        }
-
-        function buildPathSegments(path) {
-            const segments = [];
-            if (!path || path.length < 2) {
-                return segments;
-            }
-
-            let currentLine = null;
-            let segmentStart = path[0];
-            let stationCount = 0;
-
-            for (let i = 0; i < path.length - 1; i++) {
-                const from = path[i];
-                const to = path[i + 1];
-                const candidateLines = getCommonLines(from, to);
-
-                if (candidateLines.length === 0) {
-                    continue;
-                }
-
-                const nextLine = currentLine && candidateLines.includes(currentLine)
-                    ? currentLine
-                    : candidateLines[0];
-
-                if (currentLine === null) {
-                    currentLine = nextLine;
-                    segmentStart = from;
-                    stationCount = 1;
-                } else if (nextLine === currentLine) {
-                    stationCount++;
-                } else {
-                    segments.push({
-                        line: currentLine,
-                        from: segmentStart,
-                        to: from,
-                        stationCount: stationCount
-                    });
-
-                    currentLine = nextLine;
-                    segmentStart = from;
-                    stationCount = 1;
-                }
-            }
-
-            if (currentLine !== null) {
-                segments.push({
-                    line: currentLine,
-                    from: segmentStart,
-                    to: path[path.length - 1],
-                    stationCount: stationCount
-                });
-            }
-
-            return segments;
-        }
-
-        function getTransferStations(path) {
-            const result = [];
-            if (!path || path.length < 3) {
-                return result;
-            }
-
-            for (let i = 1; i < path.length - 1; i++) {
-                const prev = path[i - 1];
-                const current = path[i];
-                const next = path[i + 1];
-
-                const prevLines = getCommonLines(prev, current);
-                const nextLines = getCommonLines(current, next);
-
-                const sameLine = prevLines.some(x => nextLines.includes(x));
-                if (!sameLine) {
-                    result.push(current);
-                }
-            }
-
-            return result;
-        }
-
-        function pathSignature(path) {
-            return path.join("->");
-        }
-
-        function findShortestDistance(start, end) {
-            if (!networkGraph[start] || !networkGraph[end]) {
-                return Number.MAX_SAFE_INTEGER;
-            }
-
-            const queue = [{ station: start, dist: 0 }];
-            const visited = new Set([start]);
-
-            while (queue.length > 0) {
-                const current = queue.shift();
-                if (current.station === end) {
-                    return current.dist;
-                }
-
-                for (const next of networkGraph[current.station]) {
-                    if (!visited.has(next)) {
-                        visited.add(next);
-                        queue.push({ station: next, dist: current.dist + 1 });
-                    }
-                }
-            }
-
-            return Number.MAX_SAFE_INTEGER;
-        }
-
-        function findCandidatePaths(start, end, maxExtraSteps = 2, maxPaths = 12) {
-            if (!networkGraph[start] || !networkGraph[end]) {
-                return [];
-            }
-
-            const shortestDistance = findShortestDistance(start, end);
-            if (shortestDistance === Number.MAX_SAFE_INTEGER) {
-                return [];
-            }
-
-            const maxDepth = shortestDistance + maxExtraSteps;
-            const results = [];
-            const seen = new Set();
-
-            function dfs(current, target, path, visited) {
-                if (results.length >= maxPaths) {
-                    return;
-                }
-
-                if (path.length - 1 > maxDepth) {
-                    return;
-                }
-
-                if (current === target) {
-                    const sign = pathSignature(path);
-                    if (!seen.has(sign)) {
-                        seen.add(sign);
-                        results.push([...path]);
-                    }
-                    return;
-                }
-
-                const neighbors = Array.from(networkGraph[current] || []);
-                for (const next of neighbors) {
-                    if (visited.has(next)) {
-                        continue;
-                    }
-
-                    visited.add(next);
-                    path.push(next);
-                    dfs(next, target, path, visited);
-                    path.pop();
-                    visited.delete(next);
-                }
-            }
-
-            dfs(start, end, [start], new Set([start]));
-            return results.sort((a, b) => a.length - b.length);
-        }
-
-        function calculatePathProbability(path, useTransferFactor, transferFactor) {
-            const segments = buildPathSegments(path);
-            const transferStations = getTransferStations(path);
-            const stationCount = Math.max(path.length - 1, 1);
-            const transferCount = transferStations.length;
-
-            let weight = 1 / stationCount;
-
-            if (useTransferFactor && transferCount > 0) {
-                weight *= Math.pow(1 / transferFactor, transferCount);
-            }
-
-            const longestSegment = segments.length > 0
-                ? Math.max(...segments.map(x => x.stationCount))
-                : 1;
-
-            weight *= (1 + longestSegment * 0.03);
-
-            return {
-                path,
-                segments,
-                transferStations,
-                stationCount,
-                transferCount,
-                weight
-            };
-        }
-
-        function normalizeAllocationsByPaths(pathInfos, amount) {
-            const totalWeight = pathInfos.reduce((sum, item) => sum + item.weight, 0);
-            if (totalWeight <= 0) {
-                return [];
-            }
-
-            const results = [];
-            let allocated = 0;
-
-            pathInfos.forEach((item, index) => {
-                let allocatedAmount;
-
-                if (index === pathInfos.length - 1) {
-                    allocatedAmount = +(amount - allocated).toFixed(2);
-                } else {
-                    allocatedAmount = +((amount * item.weight) / totalWeight).toFixed(2);
-                    allocated += allocatedAmount;
-                }
-
-                results.push({
-                    ...item,
-                    allocatedAmount: allocatedAmount
-                });
-            });
-
-            return results;
-        }
-
-        function buildPathText(pathInfo) {
-            if (!pathInfo || !pathInfo.path || pathInfo.path.length === 0) {
-                return "-";
-            }
-
-            return pathInfo.path.map(station => `${station}`).join(" -> ");
-        }
-
-        function buildTransferText(pathInfo) {
-            if (!pathInfo || !pathInfo.transferStations || pathInfo.transferStations.length === 0) {
-                return "直达";
-            }
-
-            return `${pathInfo.transferStations.map(station => `${station}`).join("、")}换乘`;
-        }
-
-        function calculateClearing(entryStation, exitStation, amount, transferFactor, clearingMode) {
-            if (!entryStation || !exitStation) {
-                return [];
-            }
-
-            if (entryStation === exitStation) {
-                const onlyLine = getBelongLines(entryStation)[0];
-                return onlyLine ? [{
-                    line: onlyLine,
-                    amount: amount,
-                    pathText: onlyLine,
-                    transferText: "同站进出",
-                    pathGroup: "方案1"
-                }] : [];
-            }
-
-            const candidatePaths = findCandidatePaths(
-                entryStation,
-                exitStation,
-                clearingMode === "multi" ? 3 : 0,
-                clearingMode === "multi" ? 12 : 4
-            );
-
-            if (candidatePaths.length > 0) {
-                let selectedPaths = candidatePaths;
-
-                if (clearingMode === "shortest") {
-                    const minLength = Math.min(...candidatePaths.map(x => x.length));
-                    selectedPaths = candidatePaths.filter(x => x.length === minLength);
-                }
-
-                const useTransferFactor = clearingMode === "shortest";
-
-                const pathInfos = selectedPaths
-                    .map(path => calculatePathProbability(path, useTransferFactor, transferFactor))
-                    .filter(x => x.segments && x.segments.length > 0);
-
-                if (pathInfos.length > 0) {
-                    const normalizedPaths = normalizeAllocationsByPaths(pathInfos, amount);
-                    const results = [];
-
-                    normalizedPaths.forEach((pathInfo, pathIndex) => {
-                        const totalStations = pathInfo.segments.reduce((sum, seg) => sum + seg.stationCount, 0) || 1;
-                        let allocated = 0;
-
-                        pathInfo.segments.forEach((seg, index) => {
-                            let segAmount;
-                            if (index === pathInfo.segments.length - 1) {
-                                segAmount = +(pathInfo.allocatedAmount - allocated).toFixed(2);
-                            } else {
-                                segAmount = +((pathInfo.allocatedAmount * seg.stationCount) / totalStations).toFixed(2);
-                                allocated += segAmount;
-                            }
-
-                            results.push({
-                                line: seg.line,
-                                amount: segAmount,
-                                pathText: buildPathText(pathInfo),
-                                transferText: buildTransferText(pathInfo),
-                                pathGroup: `方案${pathIndex + 1}`
-                            });
-                        });
-                    });
-
-                    if (results.length > 0) {
-                        return results;
-                    }
-                }
-            }
-
-            const entryLines = getBelongLines(entryStation);
-            const exitLines = getBelongLines(exitStation);
-            const allLines = Array.from(new Set([...entryLines, ...exitLines]));
-
-            const entryIsTransfer = transferStationLines[entryStation];
-            const exitIsTransfer = transferStationLines[exitStation];
-
-            if (allLines.length === 1) {
-                return [{
-                    line: allLines[0],
-                    amount: amount,
-                    pathText: allLines[0],
-                    transferText: "直达",
-                    pathGroup: "方案1"
-                }];
-            }
-
-            let weights = {};
-
-            if (allLines.length === 2) {
-                allLines.forEach(line => {
-                    weights[line] = 1;
-                });
-
-                if (clearingMode === "shortest") {
-                    if (entryIsTransfer) {
-                        entryIsTransfer.forEach(line => {
-                            if (weights[line] !== undefined) {
-                                weights[line] *= transferFactor;
-                            }
-                        });
-                    }
-
-                    if (exitIsTransfer) {
-                        exitIsTransfer.forEach(line => {
-                            if (weights[line] !== undefined) {
-                                weights[line] *= transferFactor;
-                            }
-                        });
-                    }
-                }
-
-                const normalized = normalizeFallbackWeights(weights, amount);
-
-                return allLines.map(line => ({
-                    line: line,
-                    amount: normalized[line],
-                    pathText: allLines.join(" -> "),
-                    transferText: "兜底分配",
-                    pathGroup: "方案1"
-                }));
-            }
-
-            if (allLines.length >= 3) {
-                allLines.forEach((line, index) => {
-                    weights[line] = index === 0 ? 0.4 : (0.6 / (allLines.length - 1));
-                });
-
-                if (clearingMode === "shortest") {
-                    if (entryIsTransfer) {
-                        entryIsTransfer.forEach(line => {
-                            if (weights[line] !== undefined) {
-                                weights[line] *= transferFactor;
-                            }
-                        });
-                    }
-
-                    if (exitIsTransfer) {
-                        exitIsTransfer.forEach(line => {
-                            if (weights[line] !== undefined) {
-                                weights[line] *= transferFactor;
-                            }
-                        });
-                    }
-                }
-
-                const normalized = normalizeFallbackWeights(weights, amount);
-
-                return Object.keys(normalized).map(line => ({
-                    line: line,
-                    amount: normalized[line],
-                    pathText: allLines.join(" -> "),
-                    transferText: "兜底分配",
-                    pathGroup: "方案1"
-                }));
-            }
-
-            return [];
-        }
 
         function escapeHtml(value) {
             return String(value ?? "")
@@ -573,6 +95,11 @@
                 .replaceAll(">", "&gt;")
                 .replaceAll('"', "&quot;")
                 .replaceAll("'", "&#39;");
+        }
+
+        function toNumber(value) {
+            const number = Number(value ?? 0);
+            return Number.isNaN(number) ? 0 : number;
         }
 
         function groupRowsByPath(rows) {
@@ -625,7 +152,7 @@
                     }
 
                     html += `<td>${escapeHtml(item.line)}</td>`;
-                    html += `<td>${Number(item.amount || 0).toFixed(2)}</td>`;
+                    html += `<td>${toNumber(item.amount).toFixed(2)}</td>`;
                     html += `</tr>`;
                 });
             });
@@ -681,7 +208,7 @@
             insertRow.innerHTML = `
                 <td colspan="8" style="background:#f8fbff; padding:16px;">
                     <div style="margin-bottom:10px;">
-                        <strong>当前交易：</strong>${transactionId}
+                        <strong>当前交易：</strong>${escapeHtml(transactionId)}
                     </div>
                     ${buildDetailMergedTable(rows)}
                 </td>
@@ -700,133 +227,186 @@
             currentExpandedTradeId = transactionId;
         }
 
+        function renderRuleInfo(data) {
+            const ruleInfo = document.getElementById("ruleInfo");
+            const ruleDescription = document.getElementById("ruleDescription");
+
+            const mode = data.clearingMode || "-";
+            const transferCoefficient = data.transferCoefficient ?? "-";
+
+            if (mode === "shortest") {
+                ruleInfo.textContent = `当前清分模式：最短路径清分；当前换乘贡献系数：${transferCoefficient}`;
+                ruleDescription.textContent = "说明：由后端按最短路径进行清分；涉及换乘时，结合换乘贡献系数对线路分摊权重进行修正。";
+            } else if (mode === "multi") {
+                ruleInfo.textContent = "当前清分模式：多路径概率清分";
+                ruleDescription.textContent = "说明：由后端按候选路径概率进行分摊；该模式不使用换乘贡献系数。";
+            } else {
+                ruleInfo.textContent = `当前清分模式：${mode}`;
+                ruleDescription.textContent = "说明：清分参数由后端从数据库规则表读取。";
+            }
+        }
+
+        function renderSummary(summary) {
+            const summaryTableBody = document.getElementById("summaryTableBody");
+
+            if (!summary || summary.length === 0) {
+                summaryTableBody.innerHTML = `<tr><td colspan="2">暂无线路清分汇总数据</td></tr>`;
+                return;
+            }
+
+            summaryTableBody.innerHTML = summary.map(item => `
+                <tr>
+                    <td>${escapeHtml(item.lineName ?? "-")}</td>
+                    <td>${toNumber(item.clearingAmount).toFixed(2)}</td>
+                </tr>
+            `).join("");
+        }
+
+        function renderTrades(trades) {
+            const tradeTableBody = document.getElementById("tradeTableBody");
+
+            if (!trades || trades.length === 0) {
+                tradeTableBody.innerHTML = `<tr><td colspan="8">暂无可清分交易数据</td></tr>`;
+                return;
+            }
+
+            tradeTableBody.innerHTML = trades.map(item => {
+                const tradeId = item.transactionId;
+                const amount = toNumber(item.payAmount);
+
+                return `
+                    <tr id="trade-row-${tradeId}">
+                        <td>${escapeHtml(tradeId)}</td>
+                        <td>${escapeHtml(item.cardNo ?? "-")}</td>
+                        <td>${escapeHtml(item.entryStationName ?? "无进站记录")}</td>
+                        <td>${escapeHtml(item.exitStationName ?? "无出站记录")}</td>
+                        <td>${amount.toFixed(2)}</td>
+                        <td>${escapeHtml(item.pathSchemeCount ?? 0)}</td>
+                        <td>${escapeHtml(item.lineAllocationCount ?? 0)}</td>
+                        <td>
+                            <button type="button" id="toggle-btn-${tradeId}" onclick="toggleTradeDetails(${tradeId})">查看明细</button>
+                        </td>
+                    </tr>
+                `;
+            }).join("");
+        }
+
+        function buildTradeDetailMap(details) {
+            tradeDetailMap = {};
+
+            if (!details || details.length === 0) {
+                return;
+            }
+
+            details.forEach(item => {
+                const tradeId = item.transactionId;
+
+                if (!tradeDetailMap[tradeId]) {
+                    tradeDetailMap[tradeId] = [];
+                }
+
+                tradeDetailMap[tradeId].push({
+                    transactionId: item.transactionId,
+                    pathGroup: item.pathGroup ?? "方案1",
+                    pathText: item.pathText ?? "-",
+                    transferText: item.transferText ?? "-",
+                    line: item.lineName ?? "-",
+                    amount: toNumber(item.clearingAmount)
+                });
+            });
+        }
+
         async function runClearing() {
             const summaryTableBody = document.getElementById("summaryTableBody");
             const tradeTableBody = document.getElementById("tradeTableBody");
-            const ruleInfo = document.getElementById("ruleInfo");
-            const ruleDescription = document.getElementById("ruleDescription");
 
             collapseCurrentDetail();
             tradeDetailMap = {};
 
-            const transferFactor = parseFloat(localStorage.getItem("transferFactor")) || 1.1;
-            const clearingMode = localStorage.getItem("clearingMode") || "shortest";
-
-            if (clearingMode === "shortest") {
-                ruleInfo.textContent = `当前清分模式：最短路径清分；当前换乘贡献系数：${transferFactor}`;
-                ruleDescription.textContent = "说明：按最短路径进行清分；如涉及换乘，可结合换乘贡献系数进行加权分摊。";
-            } else {
-                ruleInfo.textContent = "当前清分模式：多路径概率清分";
-                ruleDescription.textContent = "说明：按候选路径概率进行分摊，不使用换乘贡献系数。";
-            }
-
             try {
-                summaryTableBody.innerHTML = `<tr><td colspan="2">正在计算...</td></tr>`;
-                tradeTableBody.innerHTML = `<tr><td colspan="8">正在计算...</td></tr>`;
+                summaryTableBody.innerHTML = `<tr><td colspan="2">正在执行后端清分...</td></tr>`;
+                tradeTableBody.innerHTML = `<tr><td colspan="8">正在执行后端清分...</td></tr>`;
 
-                await loadLineTopology();
+                document.getElementById("normalTradeCount").textContent = "0";
+                document.getElementById("exceptionTradeCount").textContent = "0";
+                document.getElementById("totalClearingAmount").textContent = "0.00";
 
-                const response = await fetch(`${apiBaseUrl}/transactions`);
+                const response = await fetch(`${apiBaseUrl}/Clearing/run`, {
+                    method: "POST"
+                });
+
                 if (!response.ok) {
-                    throw new Error(`接口请求失败：${response.status}`);
+                    const errorText = await response.text();
+                    throw new Error(`清分接口请求失败：${response.status} ${errorText}`);
                 }
 
                 const data = await response.json();
-                const normalTrades = data.filter(x => x.transactionStatus === "NORMAL");
-                const exceptionTrades = data.filter(x => x.transactionStatus === "EXCEPTION");
 
-                document.getElementById("normalTradeCount").textContent = normalTrades.length;
-                document.getElementById("exceptionTradeCount").textContent = exceptionTrades.length;
+                renderRuleInfo(data);
 
-                let totalClearingAmount = 0;
-                const lineSummary = {};
+                document.getElementById("normalTradeCount").textContent = data.normalTradeCount ?? 0;
+                document.getElementById("exceptionTradeCount").textContent = data.exceptionTradeCount ?? 0;
+                document.getElementById("totalClearingAmount").textContent = toNumber(data.totalClearingAmount).toFixed(2);
 
-                lineNames.forEach(lineName => {
-                    lineSummary[lineName] = 0;
-                });
+                renderSummary(data.summary || []);
+                buildTradeDetailMap(data.details || []);
+                renderTrades(data.trades || []);
 
-                const tradeRows = [];
-
-                normalTrades.forEach(item => {
-                    const amount = Number(item.payAmount || 0);
-                    totalClearingAmount += amount;
-
-                    const clearingResults = calculateClearing(
-                        item.entryStationName ?? "",
-                        item.exitStationName ?? "",
-                        amount,
-                        transferFactor,
-                        clearingMode
-                    );
-
-                    const tradeId = item.transactionId;
-
-                    tradeDetailMap[tradeId] = clearingResults.map(result => {
-                        const safeAmount = Number(result.amount);
-
-                        if (lineSummary[result.line] === undefined) {
-                            lineSummary[result.line] = 0;
-                        }
-
-                        if (!Number.isNaN(safeAmount)) {
-                            lineSummary[result.line] += safeAmount;
-                        }
-
-                        return {
-                            transactionId: tradeId,
-                            cardNo: item.cardNo ?? "-",
-                            entryStationName: item.entryStationName ?? "无进站记录",
-                            exitStationName: item.exitStationName ?? "无出站记录",
-                            payAmount: amount,
-                            pathGroup: result.pathGroup ?? "方案1",
-                            pathText: result.pathText ?? "-",
-                            transferText: result.transferText ?? "-",
-                            line: result.line ?? "-",
-                            amount: Number.isNaN(safeAmount) ? 0 : safeAmount
-                        };
-                    });
-
-                    const detailRows = tradeDetailMap[tradeId];
-                    const pathSchemeCount = new Set(detailRows.map(x => x.pathGroup)).size;
-                    const lineAllocationCount = detailRows.length;
-
-                    tradeRows.push(`
-                        <tr id="trade-row-${tradeId}">
-                            <td>${tradeId}</td>
-                            <td>${escapeHtml(item.cardNo ?? "-")}</td>
-                            <td>${escapeHtml(item.entryStationName ?? "无进站记录")}</td>
-                            <td>${escapeHtml(item.exitStationName ?? "无出站记录")}</td>
-                            <td>${amount.toFixed(2)}</td>
-                            <td>${pathSchemeCount}</td>
-                            <td>${lineAllocationCount}</td>
-                            <td>
-                                <button type="button" id="toggle-btn-${tradeId}" onclick="toggleTradeDetails(${tradeId})">查看明细</button>
-                            </td>
-                        </tr>
-                    `);
-                });
-
-                document.getElementById("totalClearingAmount").textContent = totalClearingAmount.toFixed(2);
-
-                summaryTableBody.innerHTML = lineNames.length > 0
-                    ? lineNames.map(lineName => `
-                        <tr>
-                            <td>${escapeHtml(lineName)}</td>
-                            <td>${(lineSummary[lineName] || 0).toFixed(2)}</td>
-                        </tr>
-                    `).join("")
-                    : `<tr><td colspan="2">暂无线路数据</td></tr>`;
-
-                tradeTableBody.innerHTML = tradeRows.length > 0
-                    ? tradeRows.join("")
-                    : `<tr><td colspan="8">暂无可清分数据</td></tr>`;
             } catch (error) {
                 console.error(error);
+
+                document.getElementById("ruleInfo").textContent = "清分执行失败。";
+                document.getElementById("ruleDescription").textContent = error.message || "请检查后端服务是否启动，以及接口地址是否正确。";
+
                 summaryTableBody.innerHTML = `<tr><td colspan="2">清分失败</td></tr>`;
                 tradeTableBody.innerHTML = `<tr><td colspan="8">清分失败，请检查后端服务是否启动</td></tr>`;
             }
         }
+                async function loadLatestResult() {
+            const summaryTableBody = document.getElementById("summaryTableBody");
+            const tradeTableBody = document.getElementById("tradeTableBody");
 
-        window.onload = runClearing;
+            collapseCurrentDetail();
+            tradeDetailMap = {};
+
+            try {
+                summaryTableBody.innerHTML = `<tr><td colspan="2">正在读取最近一次清分结果...</td></tr>`;
+                tradeTableBody.innerHTML = `<tr><td colspan="8">正在读取最近一次清分结果...</td></tr>`;
+
+                const response = await fetch(`${apiBaseUrl}/Clearing/latest`);
+
+                if (response.status === 404) {
+                    summaryTableBody.innerHTML = `<tr><td colspan="2">暂无历史清分结果，请点击“执行清分”。</td></tr>`;
+                    tradeTableBody.innerHTML = `<tr><td colspan="8">暂无历史清分结果，请点击“执行清分”。</td></tr>`;
+                    return;
+                }
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`读取最近清分结果失败：${response.status} ${errorText}`);
+                }
+
+                const data = await response.json();
+
+                renderRuleInfo(data);
+
+                document.getElementById("normalTradeCount").textContent = data.normalTradeCount ?? 0;
+                document.getElementById("exceptionTradeCount").textContent = data.exceptionTradeCount ?? 0;
+                document.getElementById("totalClearingAmount").textContent = toNumber(data.totalClearingAmount).toFixed(2);
+
+                renderSummary(data.summary || []);
+                buildTradeDetailMap(data.details || []);
+                renderTrades(data.trades || []);
+
+            } catch (error) {
+                console.error(error);
+
+                summaryTableBody.innerHTML = `<tr><td colspan="2">读取历史清分结果失败</td></tr>`;
+                tradeTableBody.innerHTML = `<tr><td colspan="8">读取历史清分结果失败，请检查后端服务是否启动</td></tr>`;
+            }
+        }
+        document.addEventListener("DOMContentLoaded", function () {
+            loadLatestResult();
+        });
     </script>
 }

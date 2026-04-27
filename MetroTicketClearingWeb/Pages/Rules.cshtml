@@ -44,42 +44,96 @@
     </div>
 </div>
 
+<div id="page-config" data-api-base-url="@Model.ApiBaseUrl"></div>
+
 @section Scripts {
     <script>
+        const apiBaseUrl = document.getElementById("page-config").dataset.apiBaseUrl + "/api";
+
         function updateTransferFactorVisibility() {
             const clearingMode = document.getElementById("clearingMode").value;
             const transferFactorSection = document.getElementById("transferFactorSection");
 
+            // 多路径概率清分不使用换乘贡献系数，但为了让用户能看到当前值，也可以选择不隐藏。
+            // 这里按你的页面说明：multi 模式下隐藏。
             transferFactorSection.style.display = clearingMode === "multi" ? "none" : "block";
         }
 
-        function loadRule() {
-            const savedClearingMode = localStorage.getItem("clearingMode") || "shortest";
-            const savedTransferFactor = localStorage.getItem("transferFactor") || "1.1";
+        async function loadRule() {
+            const saveMessage = document.getElementById("saveMessage");
 
-            document.getElementById("clearingMode").value = savedClearingMode;
-            document.getElementById("transferFactorInput").value = savedTransferFactor;
+            try {
+                saveMessage.textContent = "正在读取规则配置...";
 
-            updateTransferFactorVisibility();
+                const response = await fetch(`${apiBaseUrl}/Clearing/rules`);
+
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(`读取规则失败：${response.status} ${text}`);
+                }
+
+                const data = await response.json();
+
+                document.getElementById("clearingMode").value = data.clearingMode || "shortest";
+                document.getElementById("transferFactorInput").value = data.transferCoefficient ?? "1.1";
+
+                updateTransferFactorVisibility();
+
+                if ((data.clearingMode || "shortest") === "multi") {
+                    saveMessage.textContent = "规则配置读取成功。当前模式：多路径概率清分，该模式不使用换乘贡献系数。";
+                } else {
+                    saveMessage.textContent = `规则配置读取成功。当前模式：最短路径清分，换乘贡献系数：${data.transferCoefficient ?? "1.1"}`;
+                }
+            } catch (error) {
+                console.error(error);
+                saveMessage.textContent = "规则读取失败，请检查后端服务是否启动。";
+            }
         }
 
-        function saveRule() {
+        async function saveRule() {
             const clearingMode = document.getElementById("clearingMode").value;
             const transferFactorInput = document.getElementById("transferFactorInput").value.trim();
             const saveMessage = document.getElementById("saveMessage");
 
-            if (clearingMode === "shortest") {
-                const transferFactor = parseFloat(transferFactorInput);
-                if (Number.isNaN(transferFactor) || transferFactor <= 0) {
-                    saveMessage.textContent = "保存失败：换乘贡献系数必须是大于 0 的数字。";
-                    return;
-                }
+            const transferFactor = parseFloat(transferFactorInput);
 
-                localStorage.setItem("transferFactor", transferFactorInput);
+            if (Number.isNaN(transferFactor) || transferFactor <= 0) {
+                saveMessage.textContent = "保存失败：换乘贡献系数必须是大于 0 的数字。";
+                return;
             }
 
-            localStorage.setItem("clearingMode", clearingMode);
-            saveMessage.textContent = "规则保存成功。";
+            try {
+                saveMessage.textContent = "正在保存规则...";
+
+                const response = await fetch(`${apiBaseUrl}/Clearing/rules`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        clearingMode: clearingMode,
+                        transferCoefficient: transferFactor
+                    })
+                });
+
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(`保存规则失败：${response.status} ${text}`);
+                }
+
+                const data = await response.json();
+
+                if (data.clearingMode === "multi") {
+                    saveMessage.textContent = "规则保存成功。当前模式：多路径概率清分。该模式不使用换乘贡献系数。";
+                } else {
+                    saveMessage.textContent = `规则保存成功。当前模式：最短路径清分，换乘贡献系数：${data.transferCoefficient}`;
+                }
+
+                updateTransferFactorVisibility();
+            } catch (error) {
+                console.error(error);
+                saveMessage.textContent = "规则保存失败，请检查后端服务或数据库配置。";
+            }
         }
 
         document.addEventListener("DOMContentLoaded", function () {
