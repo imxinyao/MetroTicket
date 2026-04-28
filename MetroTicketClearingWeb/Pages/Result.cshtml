@@ -7,7 +7,7 @@
 <div class="header page-header">
     <div>
         <h1>清分结果展示</h1>
-        <p class="sub-text">根据交易数据和规则参数进行后端清分</p>
+        <p class="sub-text">根据交易数据、已发布时刻表和清分规则进行后端清分</p>
     </div>
     <button type="button" onclick="runClearing()">执行/刷新清分</button>
 </div>
@@ -16,7 +16,7 @@
     <h3>当前清分参数</h3>
     <div id="ruleInfo" class="message-text">点击“执行清分”后读取后端规则参数。</div>
     <div id="ruleDescription" class="sub-text" style="margin-top: 10px;">
-        说明：当前页面只负责展示，清分算法由后端接口执行并写入数据库。
+        说明：只有成功匹配已发布时刻表的刷卡交易才参与清分，无法匹配时刻表的交易不参与清分。
     </div>
 </div>
 
@@ -55,7 +55,8 @@
 <div class="panel">
     <h3>交易清分总览</h3>
     <div class="sub-text" style="margin-bottom:12px;">
-        说明：每笔交易只显示一行。“路径方案数”表示候选方案个数，“线路分摊条数”表示展开后涉及的线路金额拆分记录数。点击“查看明细”可在当前交易下方展开具体分摊结果。
+        说明：这里只展示已经成功匹配已发布时刻表并参与清分的交易。无法匹配时刻表的正常交易不会进入清分结果。
+        “路径方案数”表示候选方案个数，“线路分摊条数”表示展开后涉及的线路金额拆分记录数。点击“查看明细”可在当前交易下方展开具体分摊结果。
     </div>
 
     <table>
@@ -233,16 +234,17 @@
 
             const mode = data.clearingMode || "-";
             const transferCoefficient = data.transferCoefficient ?? "-";
+            const timetableMatchedTradeCount = data.timetableMatchedTradeCount ?? 0;
 
             if (mode === "shortest") {
                 ruleInfo.textContent = `当前清分模式：最短路径清分；当前换乘贡献系数：${transferCoefficient}`;
-                ruleDescription.textContent = "说明：由后端按最短路径进行清分；涉及换乘时，结合换乘贡献系数对线路分摊权重进行修正。";
+                ruleDescription.textContent = `说明：系统仅对成功匹配已发布时刻表的刷卡交易进行清分；无法匹配时刻表的交易不参与清分。本次已发布时刻表匹配交易数：${timetableMatchedTradeCount}。`;
             } else if (mode === "multi") {
                 ruleInfo.textContent = "当前清分模式：多路径概率清分";
-                ruleDescription.textContent = "说明：由后端按候选路径概率进行分摊；该模式不使用换乘贡献系数。";
+                ruleDescription.textContent = `说明：系统仅对成功匹配已发布时刻表的刷卡交易进行清分；无法匹配时刻表的交易不参与清分。该模式按候选路径概率进行分摊。本次已发布时刻表匹配交易数：${timetableMatchedTradeCount}。`;
             } else {
                 ruleInfo.textContent = `当前清分模式：${mode}`;
-                ruleDescription.textContent = "说明：清分参数由后端从数据库规则表读取。";
+                ruleDescription.textContent = `说明：清分参数由后端从数据库规则表读取；只有成功匹配已发布时刻表的交易才参与清分。本次已发布时刻表匹配交易数：${timetableMatchedTradeCount}。`;
             }
         }
 
@@ -362,7 +364,8 @@
                 tradeTableBody.innerHTML = `<tr><td colspan="8">清分失败，请检查后端服务是否启动</td></tr>`;
             }
         }
-                async function loadLatestResult() {
+
+        async function loadLatestResult() {
             const summaryTableBody = document.getElementById("summaryTableBody");
             const tradeTableBody = document.getElementById("tradeTableBody");
 
@@ -405,6 +408,7 @@
                 tradeTableBody.innerHTML = `<tr><td colspan="8">读取历史清分结果失败，请检查后端服务是否启动</td></tr>`;
             }
         }
+
         document.addEventListener("DOMContentLoaded", function () {
             loadLatestResult();
         });

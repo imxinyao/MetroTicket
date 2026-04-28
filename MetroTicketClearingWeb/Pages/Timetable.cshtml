@@ -2,6 +2,48 @@
 @model MetroTicketClearingWeb.Pages.TimetableModel
 @{
     ViewData["Title"] = "时刻表与清分准备";
+
+    string GetClearingReadyText(MetroTicketClearingWeb.Pages.TimetableModel.TimetableHeaderDto item)
+    {
+        var today = DateTime.Today;
+
+        if (item.Status != 1)
+        {
+            return "未发布，不参与时刻表清分";
+        }
+
+        if (item.IsActive != 1)
+        {
+            return "未激活，不参与时刻表清分";
+        }
+
+        if (item.EffectiveStartDate.Date > today)
+        {
+            return "尚未生效，当前不参与时刻表清分";
+        }
+
+        if (item.EffectiveEndDate.Date < today)
+        {
+            return "已过期，当前不参与时刻表清分";
+        }
+
+        return "可用于时刻表清分";
+    }
+
+    string GetClearingReadyClass(MetroTicketClearingWeb.Pages.TimetableModel.TimetableHeaderDto item)
+    {
+        var today = DateTime.Today;
+
+        if (item.Status == 1 &&
+            item.IsActive == 1 &&
+            item.EffectiveStartDate.Date <= today &&
+            item.EffectiveEndDate.Date >= today)
+        {
+            return "success-text";
+        }
+
+        return "danger-text";
+    }
 }
 
 <div class="header page-header">
@@ -128,6 +170,7 @@ L1-001,E,5,06:20:00,,0,0,1</pre>
                     <th>生效结束</th>
                     <th>状态</th>
                     <th>激活状态</th>
+                    <th>清分可用性</th>
                     <th>操作</th>
                 </tr>
             </thead>
@@ -149,8 +192,15 @@ L1-001,E,5,06:20:00,,0,0,1</pre>
                         <td>@item.VersionNo</td>
                         <td>@item.EffectiveStartDate.ToString("yyyy-MM-dd")</td>
                         <td>@item.EffectiveEndDate.ToString("yyyy-MM-dd")</td>
-                        <td>@(!string.IsNullOrWhiteSpace(item.StatusText) ? item.StatusText : Model.GetStatusText(item.Status))</td>
-                        <td>@(!string.IsNullOrWhiteSpace(item.ActiveText) ? item.ActiveText : Model.GetActiveText(item.IsActive))</td>
+                        <td class="@(item.Status == 1 ? "success-text" : "danger-text")">
+                            @(!string.IsNullOrWhiteSpace(item.StatusText) ? item.StatusText : Model.GetStatusText(item.Status))
+                        </td>
+                        <td class="@(item.IsActive == 1 ? "success-text" : "danger-text")">
+                            @(!string.IsNullOrWhiteSpace(item.ActiveText) ? item.ActiveText : Model.GetActiveText(item.IsActive))
+                        </td>
+                        <td class="@GetClearingReadyClass(item)">
+                            @GetClearingReadyText(item)
+                        </td>
                         <td>
                             <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
                                 <a href="/Timetable?TimetableId=@item.TimetableId" class="action-link-btn">查看详情</a>
@@ -191,6 +241,10 @@ L1-001,E,5,06:20:00,,0,0,1</pre>
     else
     {
         var selected = Model.SelectedTimetable;
+
+        <div class="message-text @GetClearingReadyClass(selected)" style="margin-bottom:16px;">
+            清分可用性：@GetClearingReadyText(selected)
+        </div>
 
         <div class="summary-grid">
             <div class="summary-item">

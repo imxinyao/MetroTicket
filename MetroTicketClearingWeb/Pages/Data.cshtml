@@ -7,7 +7,7 @@
 <div class="header page-header">
     <div>
         <h1>票务数据管理</h1>
-        <p class="sub-text">查看当前数据库中的票务交易记录</p>
+        <p class="sub-text">查看当前数据库中的票务交易记录，并核对交易是否进入最近一次清分结果。</p>
     </div>
     <button type="button" onclick="loadTransactions()">加载数据库数据</button>
 </div>
@@ -27,11 +27,16 @@
                 <th>出站站点</th>
                 <th>支付金额</th>
                 <th>状态</th>
+                <th>进站ID</th>
+                <th>出站ID</th>
+                <th>基础匹配条件</th>
+                <th>最近清分结果</th>
+                <th>未参与原因</th>
             </tr>
         </thead>
         <tbody id="transactionTableBody">
             <tr>
-                <td colspan="8">正在加载数据...</td>
+                <td colspan="13">正在加载数据...</td>
             </tr>
         </tbody>
     </table>
@@ -42,6 +47,15 @@
 @section Scripts {
     <script>
         const apiBaseUrl = document.getElementById("page-config").dataset.apiBaseUrl + "/api";
+
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#39;");
+        }
 
         function formatDateTime(value) {
             if (!value) {
@@ -63,14 +77,229 @@
             return `${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss}`;
         }
 
+        function hasValue(value) {
+            return value !== null && value !== undefined && value !== "";
+        }
+
+        function getBasicMatchStatus(item) {
+            const hasEntryTime = hasValue(item.entryTime);
+            const hasEntryStationId = hasValue(item.entryStationId);
+            const hasExitStationId = hasValue(item.exitStationId);
+            const isNormal = item.transactionStatus === "NORMAL";
+
+            if (isNormal && hasEntryTime && hasEntryStationId && hasExitStationId) {
+                return {
+                    text: "可进入匹配流程",
+                    className: "success-text",
+                    isMatchable: true
+                };
+            }
+
+            const reasons = [];
+
+            if (!isNormal) {
+                reasons.push("非正常交易");
+            }
+
+            if (!hasEntryTime) {
+                reasons.push("缺少进站时间");
+            }
+
+            if (!hasEntryStationId) {
+                reasons.push("缺少进站ID");
+            }
+
+            if (!hasExitStationId) {
+                reasons.push("缺少出站ID");
+            }
+
+            return {
+                text: reasons.length > 0 ? reasons.join("、") : "不可进入匹配流程",
+                className: "danger-text",
+                isMatchable: false
+            };
+        }
+
+        function getClearingResultStatus(item, latestClearingInfo) {
+            const basicStatus = getBasicMatchStatus(item);
+
+            if (!basicStatus.isMatchable) {
+                return {
+                    text: "不参与清分",
+                    className: "danger-text"
+                };
+            }
+
+            if (!latestClearingInfo.hasLatestResult) {
+                return {
+                    text: "尚未执行清分",
+                    className: "message-text"
+                };
+            }
+
+            if (latestClearingInfo.clearedTransactionIds.has(Number(item.transactionId))) {
+                return {
+                    text: "已参与清分",
+                    className: "success-text"
+                };
+            }
+
+            return {
+                text: "未参与清分",
+                className: "danger-text"
+            };
+        }
+
+        function translateUnmatchedReason(reasonCode, reasonMessage) {
+            const code = String(reasonCode ?? "").toUpperCase();
+            const message = String(reasonMessage ?? "");
+
+            if (code === "NO_PATH") {
+                return "无可用路径";
+            }
+
+            if (code === "NO_CANDIDATE_PATH") {
+                return "无候选路径";
+            }
+
+            if (code === "NO_ENTRY_TIME") {
+                return "缺少进站时间";
+            }
+
+            if (code === "NO_ACTIVE_TIMETABLE") {
+                return "无启用时刻表";
+            }
+
+            if (code === "NO_TIMETABLE_DETAIL") {
+                return "时刻表无明细";
+            }
+
+            if (code === "NO_LINE_SEGMENT") {
+                return "路径区段无效";
+            }
+
+            if (code === "NO_ACTIVE_TIMETABLE_FOR_LINE") {
+                return "线路无生效时刻表";
+            }
+
+            if (code === "NO_MATCHED_TRAIN") {
+                return "无匹配车次";
+            }
+
+            if (code === "EXIT_TIME_TOLERANCE_EXCEEDED") {
+                return "出站早于列车到站";
+            }
+
+            if (message.includes("列车到达时间晚于出站时间容差")) {
+                return "出站早于列车到站";
+            }
+
+            if (message.includes("未匹配到可乘坐列车")) {
+                return "无匹配车次";
+            }
+
+            if (message.includes("无已发布生效时刻表")) {
+                return "线路无生效时刻表";
+            }
+
+            return message || "未记录原因";
+        }
+
+        function getUnmatchedReason(item, latestClearingInfo) {
+            const basicStatus = getBasicMatchStatus(item);
+
+            if (!basicStatus.isMatchable) {
+                return {
+                    text: "交易基础信息不完整或属于异常交易。",
+                    className: "danger-text"
+                };
+            }
+
+            if (!latestClearingInfo.hasLatestResult) {
+                return {
+                    text: "尚未执行清分，暂时没有未参与原因。",
+                    className: "message-text"
+                };
+            }
+
+            if (latestClearingInfo.clearedTransactionIds.has(Number(item.transactionId))) {
+                return {
+                    text: "-",
+                    className: ""
+                };
+            }
+
+            const unmatched = latestClearingInfo.unmatchedReasonMap.get(Number(item.transactionId));
+
+            if (unmatched) {
+                return {
+                    text: translateUnmatchedReason(unmatched.reasonCode, unmatched.reasonMessage),
+                    className: "danger-text"
+                };
+            }
+
+            return {
+                text: "该交易未进入最近一次清分结果，但系统没有记录具体原因。",
+                className: "danger-text"
+            };
+        }
+
+        async function loadLatestClearingInfo() {
+            const result = {
+                hasLatestResult: false,
+                clearedTransactionIds: new Set(),
+                unmatchedReasonMap: new Map()
+            };
+
+            try {
+                const response = await fetch(`${apiBaseUrl}/Clearing/latest`);
+
+                if (response.status === 404) {
+                    return result;
+                }
+
+                if (!response.ok) {
+                    console.warn(`读取最近清分结果失败：${response.status}`);
+                    return result;
+                }
+
+                const data = await response.json();
+                const trades = data.trades || [];
+                const unmatchedTransactions = data.unmatchedTransactions || [];
+
+                trades.forEach(item => {
+                    if (item.transactionId !== null && item.transactionId !== undefined) {
+                        result.clearedTransactionIds.add(Number(item.transactionId));
+                    }
+                });
+
+                unmatchedTransactions.forEach(item => {
+                    if (item.transactionId !== null && item.transactionId !== undefined) {
+                        result.unmatchedReasonMap.set(Number(item.transactionId), {
+                            reasonCode: item.reasonCode ?? "",
+                            reasonMessage: item.reasonMessage ?? ""
+                        });
+                    }
+                });
+
+                result.hasLatestResult = true;
+                return result;
+            } catch (error) {
+                console.warn("读取最近清分结果异常：", error);
+                return result;
+            }
+        }
+
         async function loadTransactions() {
             const tbody = document.getElementById("transactionTableBody");
             const message = document.getElementById("message");
 
-            tbody.innerHTML = `<tr><td colspan="8">正在加载数据...</td></tr>`;
-            message.textContent = "正在加载票务交易数据...";
+            tbody.innerHTML = `<tr><td colspan="13">正在加载数据...</td></tr>`;
+            message.textContent = "正在加载票务交易数据和最近一次清分结果...";
 
             try {
+                const latestClearingInfo = await loadLatestClearingInfo();
+
                 const response = await fetch(`${apiBaseUrl}/transactions`);
 
                 if (!response.ok) {
@@ -80,30 +309,62 @@
                 const data = await response.json();
 
                 if (!data || data.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="8">暂无交易数据</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="13">暂无交易数据</td></tr>`;
                     message.textContent = "当前数据库中没有交易数据。";
                     return;
                 }
 
-                tbody.innerHTML = data.map(item => `
-                    <tr>
-                        <td>${item.transactionId}</td>
-                        <td>${item.cardNo ?? "-"}</td>
-                        <td>${formatDateTime(item.entryTime)}</td>
-                        <td>${item.entryStationName ?? "无进站记录"}</td>
-                        <td>${formatDateTime(item.exitTime)}</td>
-                        <td>${item.exitStationName ?? "无出站记录"}</td>
-                        <td>${Number(item.payAmount ?? 0).toFixed(2)}</td>
-                        <td class="${item.transactionStatus === 'EXCEPTION' ? 'danger-text' : 'success-text'}">
-                            ${item.transactionStatus ?? "-"}
-                        </td>
-                    </tr>
-                `).join("");
+                tbody.innerHTML = data.map(item => {
+                    const basicStatus = getBasicMatchStatus(item);
+                    const clearingStatus = getClearingResultStatus(item, latestClearingInfo);
+                    const unmatchedReason = getUnmatchedReason(item, latestClearingInfo);
 
-                message.textContent = `共加载 ${data.length} 条交易记录。`;
+                    return `
+                        <tr>
+                            <td>${escapeHtml(item.transactionId)}</td>
+                            <td>${escapeHtml(item.cardNo ?? "-")}</td>
+                            <td>${escapeHtml(formatDateTime(item.entryTime))}</td>
+                            <td>${escapeHtml(item.entryStationName ?? "无进站记录")}</td>
+                            <td>${escapeHtml(formatDateTime(item.exitTime))}</td>
+                            <td>${escapeHtml(item.exitStationName ?? "无出站记录")}</td>
+                            <td>${Number(item.payAmount ?? 0).toFixed(2)}</td>
+                            <td class="${item.transactionStatus === 'EXCEPTION' ? 'danger-text' : 'success-text'}">
+                                ${escapeHtml(item.transactionStatus ?? "-")}
+                            </td>
+                            <td>${escapeHtml(item.entryStationId ?? "-")}</td>
+                            <td>${escapeHtml(item.exitStationId ?? "-")}</td>
+                            <td class="${basicStatus.className}">
+                                ${escapeHtml(basicStatus.text)}
+                            </td>
+                            <td class="${clearingStatus.className}">
+                                ${escapeHtml(clearingStatus.text)}
+                            </td>
+                            <td class="${unmatchedReason.className}">
+                                ${escapeHtml(unmatchedReason.text)}
+                            </td>
+                        </tr>
+                    `;
+                }).join("");
+
+                const basicMatchableCount = data.filter(item => getBasicMatchStatus(item).isMatchable).length;
+                const clearedCount = data.filter(item =>
+                    latestClearingInfo.clearedTransactionIds.has(Number(item.transactionId))
+                ).length;
+                const unmatchedCount = data.filter(item =>
+                    latestClearingInfo.unmatchedReasonMap.has(Number(item.transactionId))
+                ).length;
+                const exceptionCount = data.filter(item => item.transactionStatus === "EXCEPTION").length;
+
+                if (latestClearingInfo.hasLatestResult) {
+                    message.textContent =
+                        `共加载 ${data.length} 条交易记录，其中 ${basicMatchableCount} 条具备基础匹配条件，${clearedCount} 条已进入最近一次清分结果，${unmatchedCount} 条记录了未参与原因，${exceptionCount} 条异常交易。`;
+                } else {
+                    message.textContent =
+                        `共加载 ${data.length} 条交易记录，其中 ${basicMatchableCount} 条具备基础匹配条件，${exceptionCount} 条异常交易。当前尚未读取到历史清分结果。`;
+                }
             } catch (error) {
                 console.error(error);
-                tbody.innerHTML = `<tr><td colspan="8">数据加载失败</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="13">数据加载失败</td></tr>`;
                 message.textContent = "无法连接后端接口，请检查后端服务是否启动。";
             }
         }
