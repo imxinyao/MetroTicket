@@ -1,0 +1,603 @@
+﻿@page
+@model MetroTicketClearingWeb.Pages.NetworkModel
+@{
+    ViewData["Title"] = "线网图展示";
+}
+
+<style>
+    .network-page-header {
+        background: #fff;
+        border-radius: 10px;
+        padding: 20px 24px;
+        margin-bottom: 16px;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+        .network-page-header h1 {
+            margin: 0;
+            font-size: 26px;
+            font-weight: 700;
+            color: #1f2d3d;
+        }
+
+        .network-page-header p {
+            margin: 6px 0 0;
+            color: #606266;
+            font-size: 14px;
+        }
+
+    .network-card {
+        background: #fff;
+        border-radius: 10px;
+        padding: 18px;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+    }
+
+    .network-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        color: #606266;
+        font-size: 14px;
+    }
+
+    .network-btn {
+        background: #007bff;
+        border: none;
+        color: #fff;
+        border-radius: 6px;
+        padding: 8px 16px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+        .network-btn:hover {
+            background: #0069d9;
+        }
+
+    .network-svg-wrap {
+        width: 100%;
+        overflow: auto;
+        border: 1px solid #e4e7ed;
+        border-radius: 8px;
+        background: linear-gradient(180deg, #f8fafc 0%, #eef3f8 100%);
+    }
+
+    #networkSvg {
+        min-width: 1180px;
+        height: 700px;
+        display: block;
+    }
+
+    .map-title {
+        font-size: 28px;
+        font-weight: 700;
+        fill: #1f2937;
+    }
+
+    .map-subtitle {
+        font-size: 14px;
+        fill: #6b7280;
+    }
+
+    .station-label {
+        font-size: 15px;
+        fill: #111827;
+        font-weight: 700;
+    }
+
+    .transfer-label {
+        font-size: 16px;
+        fill: #111827;
+        font-weight: 800;
+    }
+
+    .distance-label {
+        font-size: 11px;
+        font-weight: 700;
+        fill: #334155;
+        text-anchor: middle;
+    }
+
+    .distance-box {
+        fill: rgba(255, 255, 255, 0.92);
+        stroke: #cbd5e1;
+        stroke-width: 1;
+    }
+
+    .distance-group {
+        opacity: 0.96;
+    }
+
+        .distance-group:hover {
+            opacity: 1;
+        }
+
+    .legend-title {
+        font-size: 16px;
+        fill: #111827;
+        font-weight: 800;
+    }
+
+    .legend {
+        font-size: 14px;
+        fill: #1f2d3d;
+        font-weight: 700;
+    }
+
+    .legend-sub {
+        font-size: 12px;
+        fill: #606266;
+    }
+
+    .legend-card {
+        fill: rgba(255, 255, 255, 0.82);
+        stroke: #dbe3ef;
+        stroke-width: 1;
+    }
+</style>
+
+<div class="network-page-header">
+    <div>
+        <h1>线网图展示</h1>
+        <p>展示城市轨道交通线路、站点、换乘站和区间里程，为后续清分明细路径高亮做准备。</p>
+    </div>
+    <button class="network-btn" onclick="loadNetwork()">刷新线网图</button>
+</div>
+
+<div class="network-card">
+    <div class="network-toolbar">
+        <span id="networkStatus">正在加载线网数据...</span>
+        <span>数据来源：后端接口 /api/lines/network</span>
+    </div>
+
+    <div class="network-svg-wrap">
+        <svg id="networkSvg" viewBox="0 0 1180 700">
+            <g id="titleLayer"></g>
+            <g id="sectionShadowLayer"></g>
+            <g id="sectionLayer"></g>
+            <g id="distanceLayer"></g>
+            <g id="stationLayer"></g>
+            <g id="labelLayer"></g>
+            <g id="legendLayer"></g>
+        </svg>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const apiBaseUrl = "https://localhost:7179";
+
+        const lineColors = {
+            "L01": "#d9363e",
+            "L02": "#2f6fd6",
+            "L03": "#26a65b",
+            "1": "#d9363e",
+            "2": "#2f6fd6",
+            "3": "#26a65b"
+        };
+
+        const lineNames = {
+            "L01": "1号线",
+            "L02": "2号线",
+            "L03": "3号线"
+        };
+
+        async function loadNetwork() {
+            const status = document.getElementById("networkStatus");
+            status.textContent = "正在加载线网数据...";
+
+            try {
+                const response = await fetch(`${apiBaseUrl}/api/lines/network`);
+
+                if (!response.ok) {
+                    throw new Error(`接口请求失败：${response.status}`);
+                }
+
+                const data = await response.json();
+
+                normalizeTransferStations(data);
+                drawNetwork(data);
+
+                status.textContent = `线网图加载成功：${data.stations.length} 个站点，${data.sections.length} 个区间`;
+            } catch (error) {
+                console.error(error);
+                status.textContent = "线网数据加载失败，请检查后端是否启动、端口是否正确、是否存在跨域问题。";
+                alert("线网数据加载失败，请查看浏览器控制台或检查后端接口。");
+            }
+        }
+
+        // 明确 D、E、I 为换乘站，避免数据库布尔值反序列化或测试数据异常影响展示。
+        function normalizeTransferStations(data) {
+            const transferCodes = ["D", "E", "I"];
+
+            data.stations.forEach(station => {
+                if (transferCodes.includes(station.stationCode)) {
+                    station.isTransfer = true;
+                }
+            });
+        }
+
+        function drawNetwork(data) {
+            clearSvg();
+            drawTitle();
+
+            const stationMap = {};
+            data.stations.forEach(station => {
+                stationMap[station.stationId] = station;
+            });
+
+            // 按线路顺序绘制，保证 1/2/3 号线层级稳定。
+            const sortedSections = [...data.sections].sort((a, b) => {
+                if (a.lineId !== b.lineId) {
+                    return a.lineId - b.lineId;
+                }
+                return a.sectionId - b.sectionId;
+            });
+
+            drawSectionShadows(sortedSections, stationMap);
+            drawSections(sortedSections, stationMap);
+            drawDistanceLabels(sortedSections, stationMap);
+            drawStations(data.stations);
+            drawStationLabels(data.stations);
+            drawLegend();
+        }
+
+        function clearSvg() {
+            document.getElementById("titleLayer").innerHTML = "";
+            document.getElementById("sectionShadowLayer").innerHTML = "";
+            document.getElementById("sectionLayer").innerHTML = "";
+            document.getElementById("distanceLayer").innerHTML = "";
+            document.getElementById("stationLayer").innerHTML = "";
+            document.getElementById("labelLayer").innerHTML = "";
+            document.getElementById("legendLayer").innerHTML = "";
+        }
+
+        function drawTitle() {
+            const titleLayer = document.getElementById("titleLayer");
+
+            const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            title.setAttribute("x", "380");
+            title.setAttribute("y", "48");
+            title.setAttribute("class", "map-title");
+            title.textContent = "城市轨道交通线网示意图";
+
+            const subTitle = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            subTitle.setAttribute("x", "365");
+            subTitle.setAttribute("y", "76");
+            subTitle.setAttribute("class", "map-subtitle");
+            subTitle.textContent = "基于线网基础数据自动生成，支持后续清分路径高亮展示";
+
+            titleLayer.appendChild(title);
+            titleLayer.appendChild(subTitle);
+        }
+
+        function getLineColor(section) {
+            return lineColors[section.lineCode] || lineColors[String(section.lineId)] || "#666";
+        }
+
+        function drawSectionShadows(sections, stationMap) {
+            const shadowLayer = document.getElementById("sectionShadowLayer");
+
+            sections.forEach(section => {
+                const from = stationMap[section.fromStationId];
+                const to = stationMap[section.toStationId];
+
+                if (!from || !to) {
+                    return;
+                }
+
+                const shadow = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                shadow.setAttribute("x1", from.x);
+                shadow.setAttribute("y1", from.y);
+                shadow.setAttribute("x2", to.x);
+                shadow.setAttribute("y2", to.y);
+                shadow.setAttribute("stroke", "rgba(15, 23, 42, 0.14)");
+                shadow.setAttribute("stroke-width", "18");
+                shadow.setAttribute("stroke-linecap", "round");
+
+                shadowLayer.appendChild(shadow);
+            });
+        }
+
+        function drawSections(sections, stationMap) {
+            const sectionLayer = document.getElementById("sectionLayer");
+
+            sections.forEach(section => {
+                const from = stationMap[section.fromStationId];
+                const to = stationMap[section.toStationId];
+
+                if (!from || !to) {
+                    return;
+                }
+
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("x1", from.x);
+                line.setAttribute("y1", from.y);
+                line.setAttribute("x2", to.x);
+                line.setAttribute("y2", to.y);
+                line.setAttribute("stroke", getLineColor(section));
+                line.setAttribute("stroke-width", "12");
+                line.setAttribute("stroke-linecap", "round");
+                line.setAttribute("data-section-id", section.sectionId);
+                line.setAttribute("data-line-id", section.lineId);
+                line.setAttribute("data-line-code", section.lineCode);
+
+                sectionLayer.appendChild(line);
+            });
+        }
+
+        function drawStations(stations) {
+            const stationLayer = document.getElementById("stationLayer");
+
+            stations.forEach(station => {
+                if (station.isTransfer) {
+                    drawTransferStation(stationLayer, station);
+                } else {
+                    drawNormalStation(stationLayer, station);
+                }
+            });
+        }
+
+        function drawNormalStation(layer, station) {
+            const outer = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            outer.setAttribute("cx", station.x);
+            outer.setAttribute("cy", station.y);
+            outer.setAttribute("r", "13");
+            outer.setAttribute("fill", "#ffffff");
+            outer.setAttribute("stroke", "#cbd5e1");
+            outer.setAttribute("stroke-width", "3");
+            outer.setAttribute("data-station-id", station.stationId);
+
+            layer.appendChild(outer);
+        }
+
+        function drawTransferStation(layer, station) {
+            const halo = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            halo.setAttribute("cx", station.x);
+            halo.setAttribute("cy", station.y);
+            halo.setAttribute("r", "22");
+            halo.setAttribute("fill", "#ffffff");
+            halo.setAttribute("stroke", "rgba(17, 24, 39, 0.18)");
+            halo.setAttribute("stroke-width", "6");
+
+            const outer = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            outer.setAttribute("cx", station.x);
+            outer.setAttribute("cy", station.y);
+            outer.setAttribute("r", "17");
+            outer.setAttribute("fill", "#ffffff");
+            outer.setAttribute("stroke", "#111827");
+            outer.setAttribute("stroke-width", "4");
+            outer.setAttribute("data-station-id", station.stationId);
+
+            const inner = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            inner.setAttribute("cx", station.x);
+            inner.setAttribute("cy", station.y);
+            inner.setAttribute("r", "7");
+            inner.setAttribute("fill", "#111827");
+            inner.setAttribute("data-station-id", station.stationId);
+
+            layer.appendChild(halo);
+            layer.appendChild(outer);
+            layer.appendChild(inner);
+        }
+
+        function drawStationLabels(stations) {
+            const labelLayer = document.getElementById("labelLayer");
+
+            stations.forEach(station => {
+                const offset = getStationLabelOffset(station.stationCode);
+
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("x", station.x + offset.dx);
+                text.setAttribute("y", station.y + offset.dy);
+                text.setAttribute("class", station.isTransfer ? "transfer-label" : "station-label");
+                text.textContent = station.stationName;
+
+                labelLayer.appendChild(text);
+            });
+        }
+
+        function getStationLabelOffset(code) {
+            const offsets = {
+                "A": { dx: -12, dy: -30 },
+                "B": { dx: -12, dy: -30 },
+                "C": { dx: -12, dy: -30 },
+                "D": { dx: -16, dy: -36 },
+                "E": { dx: -16, dy: -36 },
+                "F": { dx: 20, dy: 5 },
+                "G": { dx: 20, dy: 5 },
+                "H": { dx: 24, dy: 6 },
+                "I": { dx: -62, dy: 5 },
+                "J": { dx: -12, dy: -30 },
+                "K": { dx: -12, dy: -30 },
+                "L": { dx: -12, dy: -30 }
+            };
+
+            return offsets[code] || { dx: 12, dy: -12 };
+        }
+
+        function drawDistanceLabels(sections, stationMap) {
+            const distanceLayer = document.getElementById("distanceLayer");
+
+            sections.forEach(section => {
+                const from = stationMap[section.fromStationId];
+                const to = stationMap[section.toStationId];
+
+                if (!from || !to) {
+                    return;
+                }
+
+                const midX = (from.x + to.x) / 2;
+                const midY = (from.y + to.y) / 2;
+                const labelPosition = getDistanceLabelPosition(section, midX, midY);
+
+                const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                group.setAttribute("class", "distance-group");
+
+                const textValue = `${Number(section.distanceKm).toFixed(1)} km`;
+
+                const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                rect.setAttribute("x", labelPosition.x - 25);
+                rect.setAttribute("y", labelPosition.y - 12);
+                rect.setAttribute("width", "50");
+                rect.setAttribute("height", "20");
+                rect.setAttribute("rx", "5");
+                rect.setAttribute("ry", "5");
+                rect.setAttribute("class", "distance-box");
+
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("x", labelPosition.x);
+                text.setAttribute("y", labelPosition.y - 1);
+                text.setAttribute("class", "distance-label");
+                text.textContent = textValue;
+
+                group.appendChild(rect);
+                group.appendChild(text);
+                distanceLayer.appendChild(group);
+            });
+        }
+
+        function getDistanceLabelPosition(section, midX, midY) {
+            const key = `${section.lineCode}-${section.fromStationId}-${section.toStationId}`;
+
+            const customPositions = {
+                // 1号线：A-B-C-D-E
+                // 红线里程统一放在线路上方，避免和站名冲突。
+                "L01-1-2": { x: midX, y: midY - 28 },
+                "L01-2-3": { x: midX, y: midY - 28 },
+                "L01-3-4": { x: midX, y: midY - 28 },
+                "L01-4-5": { x: midX, y: midY - 28 },
+
+                // 2号线：F-G-D-H-I
+                // 蓝线是竖线，里程统一放在左侧。
+                "L02-6-7": { x: midX - 44, y: midY },
+                "L02-7-4": { x: midX - 44, y: midY },
+                "L02-4-8": { x: midX - 44, y: midY },
+                "L02-8-9": { x: midX - 44, y: midY },
+
+                // 3号线：J-K-I-E-L
+                // 下方水平段放上方，斜线段错开，避免 D/H/I/E 附近重叠。
+                "L03-10-11": { x: midX, y: midY - 28 },
+                "L03-11-9": { x: midX - 8, y: midY - 26 },
+                "L03-9-5": { x: midX + 42, y: midY + 10 },
+                "L03-5-12": { x: midX, y: midY + 26 }
+            };
+
+            if (customPositions[key]) {
+                return customPositions[key];
+            }
+
+            // 兼容以后数据库反向存储，比如 A-B 变成 B-A。
+            const reverseKey = `${section.lineCode}-${section.toStationId}-${section.fromStationId}`;
+            if (customPositions[reverseKey]) {
+                return customPositions[reverseKey];
+            }
+
+            if (section.lineCode === "L01") {
+                return { x: midX, y: midY - 28 };
+            }
+
+            if (section.lineCode === "L02") {
+                return { x: midX - 44, y: midY };
+            }
+
+            if (section.lineCode === "L03") {
+                return { x: midX + 36, y: midY - 12 };
+            }
+
+            return { x: midX, y: midY - 22 };
+        }
+
+        function drawLegend() {
+            const legendLayer = document.getElementById("legendLayer");
+
+            const card = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            card.setAttribute("x", "925");
+            card.setAttribute("y", "95");
+            card.setAttribute("width", "220");
+            card.setAttribute("height", "360");
+            card.setAttribute("rx", "12");
+            card.setAttribute("ry", "12");
+            card.setAttribute("class", "legend-card");
+
+            legendLayer.appendChild(card);
+
+            const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            title.setAttribute("x", "950");
+            title.setAttribute("y", "130");
+            title.setAttribute("class", "legend-title");
+            title.textContent = "线路图例";
+
+            legendLayer.appendChild(title);
+
+            const legends = [
+                { code: "L01", name: "1号线（红线）", desc: "A-B-C-D-E", x: 950, y: 170 },
+                { code: "L02", name: "2号线（蓝线）", desc: "F-G-D-H-I", x: 950, y: 225 },
+                { code: "L03", name: "3号线（绿线）", desc: "J-K-I-E-L", x: 950, y: 280 }
+            ];
+
+            legends.forEach(item => {
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("x1", item.x);
+                line.setAttribute("y1", item.y);
+                line.setAttribute("x2", item.x + 60);
+                line.setAttribute("y2", item.y);
+                line.setAttribute("stroke", lineColors[item.code]);
+                line.setAttribute("stroke-width", "12");
+                line.setAttribute("stroke-linecap", "round");
+
+                const name = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                name.setAttribute("x", item.x + 72);
+                name.setAttribute("y", item.y + 5);
+                name.setAttribute("class", "legend");
+                name.textContent = item.name;
+
+                const desc = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                desc.setAttribute("x", item.x + 72);
+                desc.setAttribute("y", item.y + 25);
+                desc.setAttribute("class", "legend-sub");
+                desc.textContent = item.desc;
+
+                legendLayer.appendChild(line);
+                legendLayer.appendChild(name);
+                legendLayer.appendChild(desc);
+            });
+
+            const transferTitle = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            transferTitle.setAttribute("x", 950);
+            transferTitle.setAttribute("y", 350);
+            transferTitle.setAttribute("class", "legend-title");
+            transferTitle.textContent = "换乘站说明";
+
+            const transferText1 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            transferText1.setAttribute("x", 950);
+            transferText1.setAttribute("y", 382);
+            transferText1.setAttribute("class", "legend-sub");
+            transferText1.textContent = "D站：1号线 ↔ 2号线";
+
+            const transferText2 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            transferText2.setAttribute("x", 950);
+            transferText2.setAttribute("y", 407);
+            transferText2.setAttribute("class", "legend-sub");
+            transferText2.textContent = "E站：1号线 ↔ 3号线";
+
+            const transferText3 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            transferText3.setAttribute("x", 950);
+            transferText3.setAttribute("y", 432);
+            transferText3.setAttribute("class", "legend-sub");
+            transferText3.textContent = "I站：2号线 ↔ 3号线";
+
+            legendLayer.appendChild(transferTitle);
+            legendLayer.appendChild(transferText1);
+            legendLayer.appendChild(transferText2);
+            legendLayer.appendChild(transferText3);
+        }
+
+        document.addEventListener("DOMContentLoaded", loadNetwork);
+    </script>
+}

@@ -89,6 +89,17 @@
         let tradeDetailMap = {};
         let currentExpandedTradeId = null;
 
+        const miniLineColors = {
+            "L01": "#d9363e",
+            "L02": "#2f6fd6",
+            "L03": "#26a65b",
+            "1": "#d9363e",
+            "2": "#2f6fd6",
+            "3": "#26a65b"
+        };
+
+        let miniNetworkCache = null;
+
         function escapeHtml(value) {
             return String(value ?? "")
                 .replaceAll("&", "&amp;")
@@ -113,6 +124,30 @@
                 groups[key].push(row);
             });
             return groups;
+        }
+
+        function buildPathPreviewCell(pathText, rowSpan) {
+            const safePathText = escapeHtml(pathText);
+
+            return `
+                <td rowspan="${rowSpan}">
+                    <div>
+                        <span>${safePathText}</span>
+                        <button type="button"
+                                class="path-preview-btn"
+                                data-path="${safePathText}"
+                                onclick="togglePathPreview(this)">
+                            预览路径
+                        </button>
+                    </div>
+
+                    <div class="path-preview-box">
+                        <div class="path-preview-title">路径预览</div>
+                        <div class="path-preview-subtitle"></div>
+                        <svg class="path-preview-svg" viewBox="0 0 1180 700"></svg>
+                    </div>
+                </td>
+            `;
         }
 
         function buildDetailMergedTable(rows) {
@@ -148,7 +183,7 @@
 
                     if (index === 0) {
                         html += `<td rowspan="${items.length}">${escapeHtml(groupName)}</td>`;
-                        html += `<td rowspan="${items.length}">${escapeHtml(item.pathText)}</td>`;
+                        html += buildPathPreviewCell(item.pathText, items.length);
                         html += `<td rowspan="${items.length}">${escapeHtml(item.transferText)}</td>`;
                     }
 
@@ -316,6 +351,271 @@
                     amount: toNumber(item.clearingAmount)
                 });
             });
+        }
+
+        async function getMiniNetworkData() {
+            if (miniNetworkCache) {
+                return miniNetworkCache;
+            }
+
+            const response = await fetch(`${apiBaseUrl}/lines/network`);
+
+            if (!response.ok) {
+                throw new Error(`线网接口请求失败：${response.status}`);
+            }
+
+            miniNetworkCache = await response.json();
+            normalizeMiniTransferStations(miniNetworkCache);
+
+            return miniNetworkCache;
+        }
+
+        function normalizeMiniTransferStations(data) {
+            const transferCodes = ["D", "E", "I"];
+
+            data.stations.forEach(station => {
+                if (transferCodes.includes(station.stationCode)) {
+                    station.isTransfer = true;
+                }
+            });
+        }
+
+        async function togglePathPreview(button) {
+            const cell = button.closest("td");
+            const previewBox = cell.querySelector(".path-preview-box");
+            const svg = previewBox.querySelector(".path-preview-svg");
+            const subtitle = previewBox.querySelector(".path-preview-subtitle");
+            const pathSummary = button.getAttribute("data-path");
+
+            if (!pathSummary || pathSummary === "-") {
+                alert("当前方案没有路径摘要，无法预览。");
+                return;
+            }
+
+            const isActive = previewBox.classList.contains("active");
+
+            document.querySelectorAll(".path-preview-box.active").forEach(box => {
+                if (box !== previewBox) {
+                    box.classList.remove("active");
+                }
+            });
+
+            if (isActive) {
+                previewBox.classList.remove("active");
+                return;
+            }
+
+            previewBox.classList.add("active");
+            subtitle.textContent = pathSummary;
+
+            try {
+                const data = await getMiniNetworkData();
+                drawMiniPathPreview(svg, data, pathSummary);
+            } catch (error) {
+                console.error(error);
+                svg.innerHTML = "";
+                subtitle.textContent = "线网数据加载失败，请检查后端接口。";
+            }
+        }
+
+        function drawMiniPathPreview(svg, data, pathSummary) {
+            svg.innerHTML = "";
+
+            const stationMap = {};
+            const stationNameMap = {};
+
+            data.stations.forEach(station => {
+                stationMap[station.stationId] = station;
+                stationNameMap[station.stationName] = station;
+            });
+
+            const pathStationNames = parsePathSummary(pathSummary);
+            const pathStationIds = pathStationNames
+                .map(name => stationNameMap[name]?.stationId)
+                .filter(id => id !== undefined && id !== null);
+
+            const highlightSectionKeys = new Set();
+
+            for (let i = 0; i < pathStationIds.length - 1; i++) {
+                const fromId = pathStationIds[i];
+                const toId = pathStationIds[i + 1];
+
+                highlightSectionKeys.add(`${fromId}-${toId}`);
+                highlightSectionKeys.add(`${toId}-${fromId}`);
+            }
+
+            drawMiniBackgroundSections(svg, data.sections, stationMap, highlightSectionKeys);
+            drawMiniHighlightSections(svg, data.sections, stationMap, highlightSectionKeys);
+            drawMiniStations(svg, data.stations, pathStationIds);
+            drawMiniPathLabels(svg, data.stations, pathStationIds);
+        }
+
+        function parsePathSummary(pathSummary) {
+            return String(pathSummary ?? "")
+                .replaceAll("→", ",")
+                .replaceAll("->", ",")
+                .replaceAll("-", ",")
+                .replaceAll("，", ",")
+                .split(",")
+                .map(x => x.trim())
+                .filter(x => x.length > 0);
+        }
+
+        function drawMiniBackgroundSections(svg, sections, stationMap, highlightSectionKeys) {
+            sections.forEach(section => {
+                const from = stationMap[section.fromStationId];
+                const to = stationMap[section.toStationId];
+
+                if (!from || !to) {
+                    return;
+                }
+
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("x1", from.x);
+                line.setAttribute("y1", from.y);
+                line.setAttribute("x2", to.x);
+                line.setAttribute("y2", to.y);
+                line.setAttribute("stroke", getMiniLineColor(section));
+                line.setAttribute("stroke-width", "10");
+                line.setAttribute("stroke-linecap", "round");
+                line.setAttribute("opacity", highlightSectionKeys.size > 0 ? "0.18" : "0.9");
+
+                svg.appendChild(line);
+            });
+        }
+
+        function drawMiniHighlightSections(svg, sections, stationMap, highlightSectionKeys) {
+            sections.forEach(section => {
+                const key = `${section.fromStationId}-${section.toStationId}`;
+
+                if (!highlightSectionKeys.has(key)) {
+                    return;
+                }
+
+                const from = stationMap[section.fromStationId];
+                const to = stationMap[section.toStationId];
+
+                if (!from || !to) {
+                    return;
+                }
+
+                const shadow = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                shadow.setAttribute("x1", from.x);
+                shadow.setAttribute("y1", from.y);
+                shadow.setAttribute("x2", to.x);
+                shadow.setAttribute("y2", to.y);
+                shadow.setAttribute("stroke", "rgba(249, 115, 22, 0.28)");
+                shadow.setAttribute("stroke-width", "24");
+                shadow.setAttribute("stroke-linecap", "round");
+
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("x1", from.x);
+                line.setAttribute("y1", from.y);
+                line.setAttribute("x2", to.x);
+                line.setAttribute("y2", to.y);
+                line.setAttribute("stroke", getMiniLineColor(section));
+                line.setAttribute("stroke-width", "16");
+                line.setAttribute("stroke-linecap", "round");
+
+                svg.appendChild(shadow);
+                svg.appendChild(line);
+            });
+        }
+
+        function drawMiniStations(svg, stations, pathStationIds) {
+            stations.forEach(station => {
+                const highlighted = pathStationIds.includes(station.stationId);
+
+                if (station.isTransfer) {
+                    drawMiniTransferStation(svg, station, highlighted);
+                } else {
+                    drawMiniNormalStation(svg, station, highlighted);
+                }
+            });
+        }
+
+        function drawMiniNormalStation(svg, station, highlighted) {
+            const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+
+            circle.setAttribute("cx", station.x);
+            circle.setAttribute("cy", station.y);
+            circle.setAttribute("r", highlighted ? "16" : "11");
+            circle.setAttribute("fill", highlighted ? "#fff7ed" : "#ffffff");
+            circle.setAttribute("stroke", highlighted ? "#f97316" : "#cbd5e1");
+            circle.setAttribute("stroke-width", highlighted ? "5" : "3");
+
+            svg.appendChild(circle);
+        }
+
+        function drawMiniTransferStation(svg, station, highlighted) {
+            const halo = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            halo.setAttribute("cx", station.x);
+            halo.setAttribute("cy", station.y);
+            halo.setAttribute("r", highlighted ? "25" : "20");
+            halo.setAttribute("fill", highlighted ? "rgba(251, 146, 60, 0.18)" : "#ffffff");
+            halo.setAttribute("stroke", highlighted ? "rgba(249, 115, 22, 0.45)" : "rgba(17, 24, 39, 0.18)");
+            halo.setAttribute("stroke-width", highlighted ? "8" : "5");
+
+            const outer = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            outer.setAttribute("cx", station.x);
+            outer.setAttribute("cy", station.y);
+            outer.setAttribute("r", highlighted ? "18" : "15");
+            outer.setAttribute("fill", "#ffffff");
+            outer.setAttribute("stroke", highlighted ? "#f97316" : "#111827");
+            outer.setAttribute("stroke-width", highlighted ? "5" : "4");
+
+            const inner = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            inner.setAttribute("cx", station.x);
+            inner.setAttribute("cy", station.y);
+            inner.setAttribute("r", "6");
+            inner.setAttribute("fill", highlighted ? "#f97316" : "#111827");
+
+            svg.appendChild(halo);
+            svg.appendChild(outer);
+            svg.appendChild(inner);
+        }
+
+        function drawMiniPathLabels(svg, stations, pathStationIds) {
+            stations.forEach(station => {
+                if (!pathStationIds.includes(station.stationId)) {
+                    return;
+                }
+
+                const offset = getMiniStationLabelOffset(station.stationCode);
+
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("x", station.x + offset.dx);
+                text.setAttribute("y", station.y + offset.dy);
+                text.setAttribute("font-size", station.isTransfer ? "18" : "16");
+                text.setAttribute("font-weight", "800");
+                text.setAttribute("fill", "#111827");
+                text.textContent = station.stationName;
+
+                svg.appendChild(text);
+            });
+        }
+
+        function getMiniStationLabelOffset(code) {
+            const offsets = {
+                "A": { dx: -12, dy: -30 },
+                "B": { dx: -12, dy: -30 },
+                "C": { dx: -12, dy: -30 },
+                "D": { dx: -16, dy: -36 },
+                "E": { dx: -16, dy: -36 },
+                "F": { dx: 20, dy: 5 },
+                "G": { dx: 20, dy: 5 },
+                "H": { dx: 24, dy: 6 },
+                "I": { dx: -62, dy: 5 },
+                "J": { dx: -12, dy: -30 },
+                "K": { dx: -12, dy: -30 },
+                "L": { dx: -12, dy: -30 }
+            };
+
+            return offsets[code] || { dx: 12, dy: -12 };
+        }
+
+        function getMiniLineColor(section) {
+            return miniLineColors[section.lineCode] || miniLineColors[String(section.lineId)] || "#64748b";
         }
 
         async function runClearing() {
