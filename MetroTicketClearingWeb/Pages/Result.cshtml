@@ -36,6 +36,22 @@
 </div>
 
 <div class="panel">
+    <h3>线路清分可视化展示</h3>
+
+    <div class="chart-grid">
+        <div class="chart-card">
+            <div class="chart-title">各线路清分金额柱状图</div>
+            <canvas id="lineAmountBarChart"></canvas>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-title">各线路清分金额占比饼图</div>
+            <canvas id="lineAmountPieChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<div class="panel">
     <h3>线路清分汇总</h3>
     <table>
         <thead>
@@ -50,6 +66,45 @@
             </tr>
         </tbody>
     </table>
+</div>
+
+<div class="panel">
+    <h3>清分结果查询条件</h3>
+
+    <div class="filter-grid">
+        <div class="filter-item">
+            <label for="resultStartTime">开始时间</label>
+            <input type="datetime-local" id="resultStartTime" />
+        </div>
+
+        <div class="filter-item">
+            <label for="resultEndTime">结束时间</label>
+            <input type="datetime-local" id="resultEndTime" />
+        </div>
+
+        <div class="filter-item">
+            <label for="resultLineName">线路</label>
+            <select id="resultLineName">
+                <option value="">全部线路</option>
+            </select>
+        </div>
+
+        <div class="filter-item">
+            <label for="resultPaymentType">支付方式</label>
+            <select id="resultPaymentType">
+                <option value="">全部支付方式</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="filter-actions">
+        <button type="button" onclick="applyClearingResultFilters()">查询</button>
+        <button type="button" class="secondary-btn" onclick="resetClearingResultFilters()">重置</button>
+    </div>
+
+    <div id="resultFilterMessage" class="sub-text" style="margin-top: 10px;">
+        默认展示最近一次清分结果。
+    </div>
 </div>
 
 <div class="panel">
@@ -81,13 +136,100 @@
 </div>
 
 <div id="page-config" data-api-base-url="@Model.ApiBaseUrl"></div>
+<style>
+    .chart-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-top: 10px;
+    }
+
+    .chart-card {
+        height: 380px;
+        padding: 18px;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        background: #fff;
+    }
+
+    .chart-title {
+        font-size: 18px;
+        font-weight: 700;
+        color: #111827;
+        margin-bottom: 12px;
+        text-align: center;
+    }
+
+    .chart-card canvas {
+        width: 100% !important;
+        height: 320px !important;
+    }
+
+
+    .filter-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(180px, 1fr));
+        gap: 16px;
+        margin-top: 12px;
+    }
+
+    .filter-item {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .filter-item label {
+        font-size: 14px;
+        font-weight: 700;
+        color: #1f2937;
+    }
+
+    .filter-item input,
+    .filter-item select {
+        height: 38px;
+        padding: 6px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        background: #fff;
+        font-size: 14px;
+    }
+
+    .filter-actions {
+        margin-top: 16px;
+        display: flex;
+        gap: 10px;
+    }
+
+    .secondary-btn {
+        background: #6b7280;
+    }
+
+    @@media (max-width: 900px) {
+        .chart-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
 
 @section Scripts {
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <script>
         const apiBaseUrl = document.getElementById("page-config").dataset.apiBaseUrl + "/api";
 
         let tradeDetailMap = {};
         let currentExpandedTradeId = null;
+        let lineAmountBarChart = null;
+        let lineAmountPieChart = null;
+
+        let currentClearingData = {
+            summary: [],
+            trades: [],
+            details: []
+        };
+
+        let transactionMetaMap = {};
 
         const miniLineColors = {
             "L01": "#d9363e",
@@ -112,6 +254,312 @@
         function toNumber(value) {
             const number = Number(value ?? 0);
             return Number.isNaN(number) ? 0 : number;
+        }
+
+
+
+        async function loadTransactionMetaMap() {
+            try {
+                const response = await fetch(`${apiBaseUrl}/transactions`);
+
+                if (!response.ok) {
+                    console.warn(`读取票务交易数据失败：${response.status}`);
+                    transactionMetaMap = {};
+                    return;
+                }
+
+                const transactions = await response.json();
+                transactionMetaMap = {};
+
+                (transactions || []).forEach(item => {
+                    if (item.transactionId !== null && item.transactionId !== undefined) {
+                        transactionMetaMap[Number(item.transactionId)] = item;
+                    }
+                });
+            } catch (error) {
+                console.warn("读取票务交易数据异常：", error);
+                transactionMetaMap = {};
+            }
+        }
+
+        function storeClearingData(data) {
+            currentClearingData = {
+                summary: data.summary || [],
+                trades: data.trades || [],
+                details: data.details || []
+            };
+
+            refreshClearingFilterOptions();
+            applyClearingResultFilters();
+        }
+
+        function refreshClearingFilterOptions() {
+            refreshLineFilterOptions();
+            refreshPaymentTypeFilterOptions();
+        }
+
+        function refreshLineFilterOptions() {
+            const lineSelect = document.getElementById("resultLineName");
+
+            if (!lineSelect) {
+                return;
+            }
+
+            const currentValue = lineSelect.value;
+
+            const lineNames = [...new Set(
+                (currentClearingData.details || [])
+                    .map(item => item.lineName)
+                    .filter(name => name !== null && name !== undefined && String(name).trim() !== "")
+                    .map(name => String(name).trim())
+            )].sort();
+
+            lineSelect.innerHTML = `<option value="">全部线路</option>` + lineNames.map(name => `
+                <option value="${escapeHtml(name)}">${escapeHtml(name)}</option>
+            `).join("");
+
+            if (lineNames.includes(currentValue)) {
+                lineSelect.value = currentValue;
+            }
+        }
+
+        function refreshPaymentTypeFilterOptions() {
+            const paymentSelect = document.getElementById("resultPaymentType");
+
+            if (!paymentSelect) {
+                return;
+            }
+
+            const currentValue = paymentSelect.value;
+            const tradeIds = new Set((currentClearingData.trades || []).map(item => Number(item.transactionId)));
+
+            const paymentTypes = [...new Set(
+                Object.keys(transactionMetaMap)
+                    .map(id => transactionMetaMap[id])
+                    .filter(item => item && tradeIds.has(Number(item.transactionId)))
+                    .map(item => item.paymentType)
+                    .filter(type => type !== null && type !== undefined && String(type).trim() !== "")
+                    .map(type => String(type).trim())
+            )].sort();
+
+            paymentSelect.innerHTML = `<option value="">全部支付方式</option>` + paymentTypes.map(type => `
+                <option value="${escapeHtml(type)}">${escapeHtml(formatPaymentType(type))}</option>
+            `).join("");
+
+            if (paymentTypes.includes(currentValue)) {
+                paymentSelect.value = currentValue;
+            }
+        }
+
+        function formatPaymentType(type) {
+            const value = String(type ?? "").toUpperCase();
+
+            if (value === "QR") {
+                return "QR（扫码支付）";
+            }
+
+            if (value === "CARD") {
+                return "CARD（刷卡支付）";
+            }
+
+            if (value === "NFC") {
+                return "NFC（NFC支付）";
+            }
+
+            return type || "-";
+        }
+
+        function applyClearingResultFilters() {
+            collapseCurrentDetail();
+
+            const filteredTrades = (currentClearingData.trades || []).filter(item => {
+                return matchResultTime(item)
+                    && matchResultLine(item)
+                    && matchResultPaymentType(item);
+            });
+
+            const selectedLineName = document.getElementById("resultLineName")?.value || "";
+            const filteredTradeIds = new Set(filteredTrades.map(item => Number(item.transactionId)));
+
+            let filteredDetails = (currentClearingData.details || []).filter(item =>
+                filteredTradeIds.has(Number(item.transactionId))
+            );
+
+            if (selectedLineName) {
+                filteredDetails = filteredDetails.filter(item =>
+                    String(item.lineName ?? "").trim() === selectedLineName
+                );
+            }
+
+            const displaySummary = hasActiveClearingFilter()
+                ? buildSummaryFromDetails(filteredDetails)
+                : currentClearingData.summary;
+
+            const displayTrades = filteredTrades.map(trade => {
+                const tradeId = Number(trade.transactionId);
+
+                if (!selectedLineName) {
+                    return trade;
+                }
+
+                const lineAllocationCount = filteredDetails.filter(item =>
+                    Number(item.transactionId) === tradeId
+                ).length;
+
+                return {
+                    ...trade,
+                    lineAllocationCount: lineAllocationCount
+                };
+            });
+
+            renderSummary(displaySummary || []);
+            buildTradeDetailMap(filteredDetails || []);
+            renderTrades(displayTrades || []);
+            updateResultFilterMessage(displayTrades, filteredDetails);
+        }
+
+        function matchResultTime(trade) {
+            const startTimeValue = document.getElementById("resultStartTime")?.value || "";
+            const endTimeValue = document.getElementById("resultEndTime")?.value || "";
+
+            if (!startTimeValue && !endTimeValue) {
+                return true;
+            }
+
+            const meta = transactionMetaMap[Number(trade.transactionId)] || trade;
+            const startTime = parseDateTimeLocal(startTimeValue);
+            const endTime = parseDateTimeLocal(endTimeValue);
+            const entryTime = parseDateTime(meta.entryTime);
+            const exitTime = parseDateTime(meta.exitTime);
+            const times = [entryTime, exitTime].filter(time => time !== null);
+
+            if (times.length === 0) {
+                return false;
+            }
+
+            const earliestTime = new Date(Math.min(...times.map(time => time.getTime())));
+            const latestTime = new Date(Math.max(...times.map(time => time.getTime())));
+
+            if (startTime && latestTime < startTime) {
+                return false;
+            }
+
+            if (endTime && earliestTime > endTime) {
+                return false;
+            }
+
+            return true;
+        }
+
+        function matchResultLine(trade) {
+            const selectedLineName = document.getElementById("resultLineName")?.value || "";
+
+            if (!selectedLineName) {
+                return true;
+            }
+
+            const tradeId = Number(trade.transactionId);
+
+            return (currentClearingData.details || []).some(item =>
+                Number(item.transactionId) === tradeId &&
+                String(item.lineName ?? "").trim() === selectedLineName
+            );
+        }
+
+        function matchResultPaymentType(trade) {
+            const selectedPaymentType = document.getElementById("resultPaymentType")?.value || "";
+
+            if (!selectedPaymentType) {
+                return true;
+            }
+
+            const meta = transactionMetaMap[Number(trade.transactionId)] || trade;
+            return String(meta.paymentType ?? "").trim() === selectedPaymentType;
+        }
+
+        function parseDateTimeLocal(value) {
+            if (!value) {
+                return null;
+            }
+
+            const date = new Date(value);
+
+            if (Number.isNaN(date.getTime())) {
+                return null;
+            }
+
+            return date;
+        }
+
+        function parseDateTime(value) {
+            if (!value) {
+                return null;
+            }
+
+            const date = new Date(value);
+
+            if (Number.isNaN(date.getTime())) {
+                return null;
+            }
+
+            return date;
+        }
+
+        function hasActiveClearingFilter() {
+            return !!(
+                document.getElementById("resultStartTime")?.value ||
+                document.getElementById("resultEndTime")?.value ||
+                document.getElementById("resultLineName")?.value ||
+                document.getElementById("resultPaymentType")?.value
+            );
+        }
+
+        function buildSummaryFromDetails(details) {
+            const map = {};
+
+            (details || []).forEach(item => {
+                const lineName = item.lineName ?? "-";
+
+                if (!map[lineName]) {
+                    map[lineName] = 0;
+                }
+
+                map[lineName] += toNumber(item.clearingAmount);
+            });
+
+            return Object.keys(map)
+                .sort()
+                .map(lineName => ({
+                    lineName: lineName,
+                    clearingAmount: map[lineName]
+                }));
+        }
+
+        function updateResultFilterMessage(trades, details) {
+            const message = document.getElementById("resultFilterMessage");
+
+            if (!message) {
+                return;
+            }
+
+            const totalAmount = (details || []).reduce((sum, item) => {
+                return sum + toNumber(item.clearingAmount);
+            }, 0);
+
+            if (hasActiveClearingFilter()) {
+                message.textContent = `筛选完成，共 ${trades.length} 条交易，筛选范围内清分金额 ${totalAmount.toFixed(2)} 元。`;
+            } else {
+                message.textContent = `当前展示全部清分结果，共 ${trades.length} 条交易。`;
+            }
+        }
+
+        function resetClearingResultFilters() {
+            document.getElementById("resultStartTime").value = "";
+            document.getElementById("resultEndTime").value = "";
+            document.getElementById("resultLineName").value = "";
+            document.getElementById("resultPaymentType").value = "";
+
+            applyClearingResultFilters();
         }
 
         function groupRowsByPath(rows) {
@@ -284,20 +732,192 @@
         }
 
         function renderSummary(summary) {
-            const summaryTableBody = document.getElementById("summaryTableBody");
+    const summaryTableBody = document.getElementById("summaryTableBody");
 
-            if (!summary || summary.length === 0) {
-                summaryTableBody.innerHTML = `<tr><td colspan="2">暂无线路清分汇总数据</td></tr>`;
-                return;
-            }
+    if (!summary || summary.length === 0) {
+        summaryTableBody.innerHTML = `<tr><td colspan="2">暂无线路清分汇总数据</td></tr>`;
 
-            summaryTableBody.innerHTML = summary.map(item => `
-                <tr>
-                    <td>${escapeHtml(item.lineName ?? "-")}</td>
-                    <td>${toNumber(item.clearingAmount).toFixed(2)}</td>
-                </tr>
-            `).join("");
+        try {
+            renderClearingCharts([]);
+        } catch (error) {
+            console.error("图表清空失败：", error);
         }
+
+        return;
+    }
+
+    summaryTableBody.innerHTML = summary.map(item => `
+        <tr>
+            <td>${escapeHtml(item.lineName ?? "-")}</td>
+            <td>${toNumber(item.clearingAmount).toFixed(2)}</td>
+        </tr>
+    `).join("");
+
+    try {
+        renderClearingCharts(summary);
+    } catch (error) {
+        console.error("图表渲染失败，但不影响清分结果表格显示：", error);
+    }
+}
+
+function renderClearingCharts(summary) {
+    const barCanvas = document.getElementById("lineAmountBarChart");
+    const pieCanvas = document.getElementById("lineAmountPieChart");
+
+    if (!barCanvas || !pieCanvas) {
+        return;
+    }
+
+    if (typeof Chart === "undefined") {
+        console.error("Chart.js 未加载成功，请检查网络或改成本地引入。");
+        return;
+    }
+
+    if (lineAmountBarChart) {
+        lineAmountBarChart.destroy();
+        lineAmountBarChart = null;
+    }
+
+    if (lineAmountPieChart) {
+        lineAmountPieChart.destroy();
+        lineAmountPieChart = null;
+    }
+
+    if (!summary || summary.length === 0) {
+        return;
+    }
+
+    const labels = summary.map(item => item.lineName ?? "-");
+    const amounts = summary.map(item => toNumber(item.clearingAmount));
+
+    const chartFontFamily = "'Microsoft YaHei', 'Segoe UI', Arial, sans-serif";
+
+    lineAmountBarChart = new Chart(barCanvas, {
+        type: "bar",
+        data: {
+            labels: labels,
+            datasets: [{
+                label: "清分金额",
+                data: amounts,
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: {
+                        color: "#111827",
+                        font: {
+                            size: 14,
+                            weight: "bold",
+                            family: chartFontFamily
+                        }
+                    }
+                },
+                tooltip: {
+                    titleFont: {
+                        size: 14,
+                        weight: "bold",
+                        family: chartFontFamily
+                    },
+                    bodyFont: {
+                        size: 14,
+                        family: chartFontFamily
+                    },
+                    callbacks: {
+                        label: function (context) {
+                            const value = toNumber(context.raw).toFixed(2);
+                            return `清分金额：${value} 元`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        color: "#111827",
+                        font: {
+                            size: 13,
+                            weight: "bold",
+                            family: chartFontFamily
+                        }
+                    },
+                    grid: {
+                        color: "rgba(0, 0, 0, 0.06)"
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: "#111827",
+                        font: {
+                            size: 13,
+                            weight: "bold",
+                            family: chartFontFamily
+                        },
+                        callback: function (value) {
+                            return value + "元";
+                        }
+                    },
+                    grid: {
+                        color: "rgba(0, 0, 0, 0.08)"
+                    }
+                }
+            }
+        }
+    });
+
+    lineAmountPieChart = new Chart(pieCanvas, {
+        type: "pie",
+        data: {
+            labels: labels,
+            datasets: [{
+                label: "清分金额占比",
+                data: amounts
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: "bottom",
+                    labels: {
+                        color: "#111827",
+                        font: {
+                            size: 14,
+                            weight: "bold",
+                            family: chartFontFamily
+                        },
+                        padding: 16
+                    }
+                },
+                tooltip: {
+                    titleFont: {
+                        size: 14,
+                        weight: "bold",
+                        family: chartFontFamily
+                    },
+                    bodyFont: {
+                        size: 14,
+                        family: chartFontFamily
+                    },
+                    callbacks: {
+                        label: function (context) {
+                            const total = context.dataset.data.reduce((sum, value) => sum + toNumber(value), 0);
+                            const value = toNumber(context.raw);
+                            const percent = total > 0 ? (value / total * 100).toFixed(2) : "0.00";
+                            return `${context.label}：${value.toFixed(2)} 元，占比 ${percent}%`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
 
         function renderTrades(trades) {
             const tradeTableBody = document.getElementById("tradeTableBody");
@@ -650,9 +1270,8 @@
                 document.getElementById("exceptionTradeCount").textContent = data.exceptionTradeCount ?? 0;
                 document.getElementById("totalClearingAmount").textContent = toNumber(data.totalClearingAmount).toFixed(2);
 
-                renderSummary(data.summary || []);
-                buildTradeDetailMap(data.details || []);
-                renderTrades(data.trades || []);
+                await loadTransactionMetaMap();
+                storeClearingData(data);
 
             } catch (error) {
                 console.error(error);
@@ -697,9 +1316,8 @@
                 document.getElementById("exceptionTradeCount").textContent = data.exceptionTradeCount ?? 0;
                 document.getElementById("totalClearingAmount").textContent = toNumber(data.totalClearingAmount).toFixed(2);
 
-                renderSummary(data.summary || []);
-                buildTradeDetailMap(data.details || []);
-                renderTrades(data.trades || []);
+                await loadTransactionMetaMap();
+                storeClearingData(data);
 
             } catch (error) {
                 console.error(error);

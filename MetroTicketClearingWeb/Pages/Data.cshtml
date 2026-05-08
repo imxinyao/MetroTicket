@@ -16,33 +16,115 @@
     <h3>交易数据列表</h3>
     <div id="message" class="message-text" style="margin-bottom: 12px;">正在准备加载数据...</div>
 
-    <table>
-        <thead>
-            <tr>
-                <th>交易ID</th>
-                <th>卡号</th>
-                <th>进站时间</th>
-                <th>进站站点</th>
-                <th>出站时间</th>
-                <th>出站站点</th>
-                <th>支付金额</th>
-                <th>状态</th>
-                <th>进站ID</th>
-                <th>出站ID</th>
-                <th>基础匹配条件</th>
-                <th>最近清分结果</th>
-                <th>未参与原因</th>
-            </tr>
-        </thead>
-        <tbody id="transactionTableBody">
-            <tr>
-                <td colspan="13">正在加载数据...</td>
-            </tr>
-        </tbody>
-    </table>
+    <div class="table-scroll">
+        <table class="data-table nowrap-table">
+            <thead>
+                <tr>
+                    <th>交易ID</th>
+                    <th>卡号</th>
+                    <th>进站时间</th>
+                    <th>进站站点</th>
+                    <th>出站时间</th>
+                    <th>出站站点</th>
+                    <th>支付金额</th>
+                    <th>支付方式</th>
+                    <th>状态</th>
+                    <th>进站ID</th>
+                    <th>出站ID</th>
+                    <th>最近清分结果</th>
+                    <th>未参与原因</th>
+                </tr>
+            </thead>
+            <tbody id="transactionTableBody">
+                <tr>
+                    <td colspan="13">正在加载数据...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
 </div>
 
 <div id="page-config" data-api-base-url="@Model.ApiBaseUrl"></div>
+<style>
+    .table-scroll {
+        width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
+
+    .nowrap-table {
+        min-width: 1520px;
+        table-layout: auto;
+        white-space: nowrap;
+    }
+
+        .nowrap-table th,
+        .nowrap-table td {
+            white-space: nowrap;
+            word-break: keep-all;
+            padding: 10px 12px;
+            font-size: 14px;
+            vertical-align: middle;
+            line-height: 1.4;
+            text-align: center;
+        }
+
+            .nowrap-table th:nth-child(1),
+            .nowrap-table td:nth-child(1) {
+                min-width: 70px;
+            }
+
+            .nowrap-table th:nth-child(2),
+            .nowrap-table td:nth-child(2) {
+                min-width: 120px;
+            }
+
+            .nowrap-table th:nth-child(3),
+            .nowrap-table td:nth-child(3),
+            .nowrap-table th:nth-child(5),
+            .nowrap-table td:nth-child(5) {
+                min-width: 175px;
+            }
+
+            .nowrap-table th:nth-child(4),
+            .nowrap-table td:nth-child(4),
+            .nowrap-table th:nth-child(6),
+            .nowrap-table td:nth-child(6) {
+                min-width: 95px;
+            }
+
+            .nowrap-table th:nth-child(7),
+            .nowrap-table td:nth-child(7) {
+                min-width: 85px;
+            }
+
+            .nowrap-table th:nth-child(8),
+            .nowrap-table td:nth-child(8) {
+                min-width: 140px;
+            }
+
+            .nowrap-table th:nth-child(9),
+            .nowrap-table td:nth-child(9) {
+                min-width: 105px;
+            }
+
+            .nowrap-table th:nth-child(10),
+            .nowrap-table td:nth-child(10),
+            .nowrap-table th:nth-child(11),
+            .nowrap-table td:nth-child(11) {
+                min-width: 70px;
+            }
+
+            .nowrap-table th:nth-child(12),
+            .nowrap-table td:nth-child(12) {
+                min-width: 130px;
+            }
+
+            .nowrap-table th:nth-child(13),
+            .nowrap-table td:nth-child(13) {
+                min-width: 300px;
+            }
+</style>
 
 @section Scripts {
     <script>
@@ -79,6 +161,24 @@
 
         function hasValue(value) {
             return value !== null && value !== undefined && value !== "";
+        }
+
+        function formatPaymentType(type) {
+            const value = String(type ?? "").toUpperCase();
+
+            if (value === "QR") {
+                return "QR（扫码支付）";
+            }
+
+            if (value === "CARD") {
+                return "CARD（刷卡支付）";
+            }
+
+            if (value === "NFC") {
+                return "NFC（NFC支付）";
+            }
+
+            return type || "-";
         }
 
         function getBasicMatchStatus(item) {
@@ -315,7 +415,6 @@
                 }
 
                 tbody.innerHTML = data.map(item => {
-                    const basicStatus = getBasicMatchStatus(item);
                     const clearingStatus = getClearingResultStatus(item, latestClearingInfo);
                     const unmatchedReason = getUnmatchedReason(item, latestClearingInfo);
 
@@ -328,14 +427,12 @@
                             <td>${escapeHtml(formatDateTime(item.exitTime))}</td>
                             <td>${escapeHtml(item.exitStationName ?? "无出站记录")}</td>
                             <td>${Number(item.payAmount ?? 0).toFixed(2)}</td>
+                            <td>${escapeHtml(formatPaymentType(item.paymentType))}</td>
                             <td class="${item.transactionStatus === 'EXCEPTION' ? 'danger-text' : 'success-text'}">
                                 ${escapeHtml(item.transactionStatus ?? "-")}
                             </td>
                             <td>${escapeHtml(item.entryStationId ?? "-")}</td>
                             <td>${escapeHtml(item.exitStationId ?? "-")}</td>
-                            <td class="${basicStatus.className}">
-                                ${escapeHtml(basicStatus.text)}
-                            </td>
                             <td class="${clearingStatus.className}">
                                 ${escapeHtml(clearingStatus.text)}
                             </td>
