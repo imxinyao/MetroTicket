@@ -306,7 +306,7 @@ L1-001,E,5,06:20:00,,0,0,1</pre>
 </div>
 
 <div class="panel">
-    <h3>时刻表明细（按车次分组）</h3>
+    <h3>时刻表明细</h3>
 
     @if (Model.SelectedTimetable == null)
     {
@@ -319,7 +319,7 @@ L1-001,E,5,06:20:00,,0,0,1</pre>
     else
     {
         <div class="detail-note">
-            当前明细已按 <strong>车次号</strong> 分组展示。每组先展示列车运行区间，再展示各停靠站的到发时间与停站分钟，更适合课堂演示时逐车次说明。
+            当前明细按 <strong>车次号</strong> 分组展示。
         </div>
 
         @for (int i = 0; i < Model.GroupedDetails.Count; i++)
